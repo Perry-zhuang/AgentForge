@@ -78,6 +78,22 @@ class PolicyEngineTest {
                 .contains("src/main/java/demo/security/Auth.java", "modules/user/pom.xml");
     }
 
+    @Test
+    void renameCountsOnceForMaxFilesWhileBothPathsRemainPolicyInputs() {
+        PolicyConfig config = withChange(new PolicyConfig.ChangePolicy(1,
+                List.of("old/Denied.java"), List.of("new/Protected.java")));
+        ChangedFile rename = new ChangedFile(ChangeStatus.RENAMED,
+                "new/Protected.java", "old/Denied.java");
+
+        PolicyReport report = engine.evaluate(List.of(rename), config, emptyArchitecture());
+
+        assertThat(report.violations()).extracting(v -> v.rule(), v -> v.path())
+                .containsExactlyInAnyOrder(
+                        org.assertj.core.groups.Tuple.tuple("change.deny", "old/Denied.java"),
+                        org.assertj.core.groups.Tuple.tuple("change.protected", "new/Protected.java"));
+        assertThat(report.violations()).noneMatch(v -> v.rule().equals("change.max_files"));
+    }
+
     private PolicyReport evaluate(List<ChangedFile> files, PolicyConfig config) {
         return engine.evaluate(change(files), config, emptyArchitecture());
     }

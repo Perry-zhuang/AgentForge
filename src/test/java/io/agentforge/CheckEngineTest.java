@@ -11,6 +11,7 @@ import io.agentforge.model.DependencyEdge;
 import io.agentforge.model.DependencyGraph;
 import io.agentforge.model.DiffAuditReport;
 import io.agentforge.model.EngineeringPlan;
+import io.agentforge.model.ExecutionChangeReport;
 import io.agentforge.model.JavaRole;
 import io.agentforge.model.JavaTypeInfo;
 import io.agentforge.model.PolicyReport;
@@ -21,6 +22,7 @@ import io.agentforge.model.RiskReport;
 import io.agentforge.model.ScoreBreakdown;
 import io.agentforge.model.TaskType;
 import io.agentforge.model.VerificationFinding;
+import io.agentforge.model.VerificationChangeSet;
 import io.agentforge.model.VerificationStatus;
 import io.agentforge.model.ViolationSeverity;
 import io.agentforge.verification.CheckEngine;
@@ -165,6 +167,73 @@ class CheckEngineTest {
                         "a/Outside.java", "src/main/java/demo/SecondaryService.java", "z/Outside.java");
     }
 
+    @Test
+    void executionStagingActivityChecksScopeButNotAnalysisSourceContent() {
+        EngineeringPlan plan = PromptTestFixtures.plan(TaskType.ANALYSIS);
+        ExecutionChangeReport.ExecutionChange staged = new ExecutionChangeReport.ExecutionChange(
+                ExecutionChangeReport.ChangeType.GIT_STATE_CHANGED,
+                "src/main/java/demo/PrimaryService.java", null, false, true);
+
+        var report = engine.verify(plan, executionFacts(plan, List.of(staged)));
+
+        assertThat(report.scopeStatus()).isEqualTo(VerificationStatus.PASS);
+        assertThat(report.taskTypeStatus()).isEqualTo(VerificationStatus.PASS);
+        assertThat(report.findings()).isEmpty();
+    }
+
+    @Test
+    void executionAnalysisOutOfScopeContentChangePreservesBothFindings() {
+        EngineeringPlan plan = PromptTestFixtures.plan(TaskType.ANALYSIS);
+        ExecutionChangeReport.ExecutionChange modified = new ExecutionChangeReport.ExecutionChange(
+                ExecutionChangeReport.ChangeType.MODIFIED,
+                "src/main/java/demo/OutsideService.java", null, true, false);
+
+        var report = engine.verify(plan, executionFacts(plan, List.of(modified)));
+
+        assertThat(report.findings()).extracting(VerificationFinding::code)
+                .containsExactly("OUT_OF_SCOPE_MODIFICATION", "ANALYSIS_SOURCE_MODIFICATION");
+        assertThat(report.overallStatus()).isEqualTo(VerificationStatus.FAIL);
+    }
+
+    @Test
+    void executionRenameEvaluatesOldAndNewScopePathsWithoutDuplicatingTheFileFact() {
+        EngineeringPlan plan = PromptTestFixtures.plan(TaskType.BUGFIX);
+        ExecutionChangeReport.ExecutionChange rename = new ExecutionChangeReport.ExecutionChange(
+                ExecutionChangeReport.ChangeType.RENAMED,
+                "src/main/java/demo/OutsideService.java",
+                "src/main/java/demo/PrimaryService.java", false, true);
+        VerificationChangeSet facts = executionFacts(plan, List.of(rename));
+
+        var report = engine.verify(plan, facts);
+
+        assertThat(facts.changes()).hasSize(1);
+        assertThat(report.findings()).extracting(VerificationFinding::code, VerificationFinding::path)
+                .containsExactly(org.assertj.core.groups.Tuple.tuple(
+                        "OUT_OF_SCOPE_MODIFICATION", "src/main/java/demo/OutsideService.java"));
+    }
+
+    @Test
+    void executionAddedDeletedAndGitStateFactsUseTheSameScopeRuleTruth() {
+        EngineeringPlan plan = PromptTestFixtures.plan(TaskType.BUGFIX);
+        List<ExecutionChangeReport.ExecutionChange> changes = List.of(
+                new ExecutionChangeReport.ExecutionChange(ExecutionChangeReport.ChangeType.ADDED,
+                        "src/main/java/demo/PrimaryService.java", null, true, true),
+                new ExecutionChangeReport.ExecutionChange(ExecutionChangeReport.ChangeType.DELETED,
+                        "src/main/java/demo/SecondaryService.java", null, true, true),
+                new ExecutionChangeReport.ExecutionChange(ExecutionChangeReport.ChangeType.GIT_STATE_CHANGED,
+                        "src/main/java/demo/TaskRequest.java", null, false, true));
+
+        var report = engine.verify(plan, executionFacts(plan, changes));
+
+        assertThat(report.findings()).extracting(VerificationFinding::code, VerificationFinding::path)
+                .containsExactly(
+                        org.assertj.core.groups.Tuple.tuple("SECONDARY_SCOPE_MODIFIED",
+                                "src/main/java/demo/SecondaryService.java"),
+                        org.assertj.core.groups.Tuple.tuple("REFERENCE_SCOPE_MODIFIED",
+                                "src/main/java/demo/TaskRequest.java"));
+        assertThat(report.scopeStatus()).isEqualTo(VerificationStatus.FAIL);
+    }
+
     private DiffAuditReport diff(EngineeringPlan plan, List<ChangedFile> files,
                                  PolicyReport policy, ArchitectureReport architecture) {
         RepositoryInfo source = plan.repository().repository();
@@ -192,5 +261,14 @@ class CheckEngineTest {
 
     private ChangedFile changed(String path) {
         return new ChangedFile(ChangeStatus.MODIFIED, path);
+    }
+
+    private VerificationChangeSet executionFacts(
+            EngineeringPlan plan, List<ExecutionChangeReport.ExecutionChange> changes) {
+        RepositoryInfo repository = plan.repository().repository();
+        ExecutionChangeReport execution = new ExecutionChangeReport(repository.path().toString(),
+                repository.branch(), repository.branch(), false, repository.head(), repository.head(), false, changes);
+        return VerificationChangeSet.executionDelta(repository, execution, new PolicyReport(List.of()),
+                plan.repository().architecture(), plan.defaultPolicyUsed(), List.of());
     }
 }

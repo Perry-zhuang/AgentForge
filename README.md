@@ -4,7 +4,7 @@ AgentForge is a local AI Engineering control plane and repository governance CLI
 
 AgentForge does not write code. It analyzes the repository, a development task, and the current change before or after a Coding Agent works on it.
 
-V0.2 P4 P1 adds deterministic repository baselines and execution-delta reporting on top of boundary verification:
+V0.2 P4 P2 adds deterministic execution-window boundary verification on top of repository baselines:
 
 - Task Inspection
 - Engineering Plan
@@ -34,6 +34,7 @@ java -Xss16m -jar target/agentforge.jar prompt /path/to/project "development tas
 java -Xss16m -jar target/agentforge.jar check /path/to/project "development task"
 java -jar target/agentforge.jar baseline capture /path/to/project --output /tmp/agentforge-baseline.json
 java -jar target/agentforge.jar baseline compare /path/to/project --baseline /tmp/agentforge-baseline.json
+java -Xss16m -jar target/agentforge.jar check /path/to/project "development task" --baseline /tmp/agentforge-baseline.json
 ```
 
 ## Commands
@@ -93,11 +94,17 @@ Verifies the current Git working-tree changes against the deterministic Engineer
 ```bash
 java -Xss16m -jar target/agentforge.jar check "fix login 401"
 java -Xss16m -jar target/agentforge.jar check /path/to/project "fix backup alert synchronization"
+java -Xss16m -jar target/agentforge.jar check /path/to/project "fix backup alert synchronization" \
+  --baseline /tmp/agentforge-before.json
 ```
 
 Check calls planning once, consumes the existing Diff facts, and does not rescan source or infer new architecture facts in `CheckEngine`. PRIMARY changes are allowed, SECONDARY changes require review, and REFERENCE or out-of-scope changes fail. For ANALYSIS tasks, recognized source-code changes fail independently of scope findings. Individual policy violations are preserved from the existing Policy result.
 
-The P4 P0 baseline is `CURRENT_WORKING_TREE`. A dirty repository is supported, but Check cannot yet distinguish pre-existing dirty changes from changes introduced by a specific Coding Agent execution. PASS and WARNING return exit code 0, FAIL returns 1, and command/configuration errors return 2.
+Without `--baseline`, the P4 P0 baseline remains `CURRENT_WORKING_TREE` with its existing output and behavior. With `--baseline`, Check uses only `ExecutionChangeReport` entries introduced after that snapshot: historical dirty files that remain unchanged do not participate in scope, task-type, policy, or architecture compliance. Execution decisions are labeled `CHECK EXECUTION PASS/WARNING/FAIL`.
+
+Execution policy evaluation reuses the existing max-files, denied-path, and protected-path rules over execution files only. A rename counts once for max-files while both old and new paths are checked. Git-state-only activity participates in scope and path policy, but does not count as ANALYSIS source-content modification. Architecture failures are evidence-safe: without architecture snapshots, a current violation is attributed to execution only when its source file was added during the execution window; existing-file changes are reported with an attribution limitation instead of being mislabeled.
+
+Both modes are read-only. PASS and WARNING return exit code 0, FAIL returns 1, and command, configuration, baseline, schema, repository-identity, or capture errors return 2.
 
 ### `agentforge baseline`
 
@@ -112,7 +119,7 @@ Snapshots contain a versioned, deterministic JSON representation of the canonica
 
 Comparison reports file content changes, Git-state-only changes, add/delete, and Git-confirmed rename facts. A rename already present when the baseline is captured is not attributed to the later execution window. Branch and HEAD changes are reported as facts. Both `EXECUTION DELTA NONE` and `EXECUTION DELTA CHANGED` return exit code 0; invalid invocation, snapshot, schema, repository identity, or file access returns 2.
 
-The baseline file must be outside the target repository. Capture and compare do not modify the target repository. P4 P1 only produces an `ExecutionChangeReport`; it is not yet connected to `agentforge check`.
+The baseline file must be outside the target repository. Capture, compare, and execution check do not modify the target repository or the baseline file. P4 P2 consumes the existing `ExecutionChangeReport` without changing snapshot or delta semantics.
 
 ### `agentforge audit`
 
@@ -154,7 +161,7 @@ It does not guarantee detection of generic-wrapped dependencies, reflection, run
 
 `agentforge diff` audits the working tree against the current repository state. It includes staged, unstaged, untracked, deleted, and renamed files.
 
-`agentforge check` evaluates the same current working tree against a task-specific Engineering Boundary. P4 P1 can separately capture and compare execution-window state, but that `ExecutionChangeReport` is not connected to Check until a later phase.
+`agentforge check` without `--baseline` evaluates the current working tree against a task-specific Engineering Boundary. With `--baseline`, it evaluates only the deterministic execution delta and never falls back to whole-working-tree changes.
 
 ### Architecture Diff
 
@@ -162,7 +169,7 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.2 P4 P1 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, prompt generation, boundary verification, snapshot capture, and execution-delta comparison are deterministic, local, and explainable. Prompt packages existing engineering facts, Check compares existing Plan and Diff facts, and Baseline compares immutable repository states without becoming an execution or code-review layer.
+V0.2 P4 P2 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, prompt generation, boundary verification, snapshot capture, execution-delta comparison, and execution check are deterministic, local, and explainable. Execution Check verifies boundary compliance; it does not decide whether code is correct or whether a bug is fixed.
 
 ### Task Inspection
 

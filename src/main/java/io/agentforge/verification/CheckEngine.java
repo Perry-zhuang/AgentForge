@@ -1,6 +1,5 @@
 package io.agentforge.verification;
 
-import io.agentforge.model.ChangedFile;
 import io.agentforge.model.DependencyEdge;
 import io.agentforge.model.DiffAuditReport;
 import io.agentforge.model.EngineeringPlan;
@@ -8,6 +7,8 @@ import io.agentforge.model.FileType;
 import io.agentforge.model.PolicyViolation;
 import io.agentforge.model.TaskType;
 import io.agentforge.model.VerificationFinding;
+import io.agentforge.model.VerificationChangeSet;
+import io.agentforge.model.VerificationChangeSet.VerificationChange;
 import io.agentforge.model.VerificationReport;
 import io.agentforge.model.VerificationStatus;
 import io.agentforge.model.ViolationSeverity;
@@ -20,17 +21,24 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class CheckEngine {
-    private static final List<String> LIMITATIONS = List.of(
+    private static final List<String> CURRENT_WORKING_TREE_LIMITATIONS = List.of(
             "Check evaluates the current working tree.",
             "Pre-existing dirty changes cannot yet be distinguished from changes introduced by a specific Coding Agent execution.");
+    private static final List<String> EXECUTION_LIMITATIONS = List.of(
+            "Execution Check evaluates only changes introduced after the supplied baseline.",
+            "Branch and HEAD changes are reported as facts and are not verification violations in P4 P2.");
 
     public VerificationReport verify(EngineeringPlan plan, DiffAuditReport diffAudit) {
-        validateFacts(plan, diffAudit);
+        return verify(plan, VerificationChangeSet.currentWorkingTree(diffAudit));
+    }
+
+    public VerificationReport verify(EngineeringPlan plan, VerificationChangeSet changeSet) {
+        validateFacts(plan, changeSet);
         List<VerificationFinding> findings = new ArrayList<>();
-        addScopeFindings(plan, diffAudit, findings);
-        addPolicyFindings(diffAudit, findings);
-        addTaskTypeFindings(plan, diffAudit, findings);
-        addArchitectureFindings(plan, diffAudit, findings);
+        addScopeFindings(plan, changeSet, findings);
+        addPolicyFindings(changeSet, findings);
+        addTaskTypeFindings(plan, changeSet, findings);
+        addArchitectureFindings(plan, changeSet, findings);
         findings.sort(Comparator.comparing((VerificationFinding finding) -> finding.category().ordinal())
                 .thenComparing(VerificationFinding::path)
                 .thenComparing(VerificationFinding::code)
@@ -41,26 +49,30 @@ public class CheckEngine {
         VerificationStatus taskType = status(findings, VerificationFinding.Category.TASK_TYPE);
         VerificationStatus architecture = status(findings, VerificationFinding.Category.ARCHITECTURE);
         VerificationStatus overall = strictest(List.of(scope, policy, taskType, architecture));
-        return new VerificationReport(plan, diffAudit, VerificationReport.Baseline.CURRENT_WORKING_TREE,
-                scope, policy, taskType, architecture, overall, findings, LIMITATIONS);
+        List<String> limitations = new ArrayList<>(changeSet.baseline()
+                == VerificationReport.Baseline.CURRENT_WORKING_TREE
+                ? CURRENT_WORKING_TREE_LIMITATIONS : EXECUTION_LIMITATIONS);
+        limitations.addAll(changeSet.limitations());
+        return new VerificationReport(plan, changeSet.currentWorkingTreeAudit().orElse(null), changeSet.baseline(),
+                scope, policy, taskType, architecture, overall, findings, limitations, changeSet);
     }
 
-    private void validateFacts(EngineeringPlan plan, DiffAuditReport diffAudit) {
-        if (!plan.repository().repository().path().equals(diffAudit.changeReport().repository().path())) {
+    private void validateFacts(EngineeringPlan plan, VerificationChangeSet changeSet) {
+        if (!plan.repository().repository().path().equals(changeSet.repository().path())) {
             throw new IllegalArgumentException("Plan and Git changes must refer to the same repository");
         }
         if (plan.repository().architecture().contractConfigured()
-                != diffAudit.architectureReport().contractConfigured()) {
+                != changeSet.architectureReport().contractConfigured()) {
             throw new IllegalStateException("Architecture contract state changed while check was running");
         }
     }
 
-    private void addScopeFindings(EngineeringPlan plan, DiffAuditReport diffAudit,
+    private void addScopeFindings(EngineeringPlan plan, VerificationChangeSet changeSet,
                                   List<VerificationFinding> findings) {
         Set<String> primary = paths(plan.scope().primary());
         Set<String> secondary = paths(plan.scope().secondary());
         Set<String> reference = paths(plan.scope().reference());
-        for (ChangedFile file : diffAudit.changeReport().files()) {
+        for (VerificationChange file : changeSet.changes()) {
             for (String path : logicalPaths(file)) {
                 if (primary.contains(path)) continue;
                 if (secondary.contains(path)) {
@@ -80,18 +92,19 @@ public class CheckEngine {
         }
     }
 
-    private void addPolicyFindings(DiffAuditReport diffAudit, List<VerificationFinding> findings) {
-        for (PolicyViolation violation : diffAudit.policyReport().violations()) {
+    private void addPolicyFindings(VerificationChangeSet changeSet, List<VerificationFinding> findings) {
+        for (PolicyViolation violation : changeSet.policyReport().violations()) {
             findings.add(new VerificationFinding(VerificationFinding.Category.POLICY,
                     violation.severity(), "POLICY_VIOLATION", violation.path(),
                     violation.rule() + " — " + violation.message()));
         }
     }
 
-    private void addTaskTypeFindings(EngineeringPlan plan, DiffAuditReport diffAudit,
+    private void addTaskTypeFindings(EngineeringPlan plan, VerificationChangeSet changeSet,
                                      List<VerificationFinding> findings) {
         if (plan.taskType() != TaskType.ANALYSIS) return;
-        for (ChangedFile file : diffAudit.changeReport().files()) {
+        for (VerificationChange file : changeSet.changes()) {
+            if (!file.contentChanged()) continue;
             for (String path : logicalPaths(file)) {
                 if (!fileType(path).source()) continue;
                 findings.add(new VerificationFinding(VerificationFinding.Category.TASK_TYPE,
@@ -101,12 +114,12 @@ public class CheckEngine {
         }
     }
 
-    private void addArchitectureFindings(EngineeringPlan plan, DiffAuditReport diffAudit,
+    private void addArchitectureFindings(EngineeringPlan plan, VerificationChangeSet changeSet,
                                          List<VerificationFinding> findings) {
         if (!plan.repository().architecture().contractConfigured()) return;
-        for (DependencyEdge edge : diffAudit.architectureReport().contractViolations()) {
-            String path = diffAudit.architectureReport().graph().nodes().containsKey(edge.from())
-                    ? diffAudit.architectureReport().graph().nodes().get(edge.from()).path() : "-";
+        for (DependencyEdge edge : changeSet.architectureReport().contractViolations()) {
+            String path = changeSet.architectureReport().graph().nodes().containsKey(edge.from())
+                    ? changeSet.architectureReport().graph().nodes().get(edge.from()).path() : "-";
             findings.add(new VerificationFinding(VerificationFinding.Category.ARCHITECTURE,
                     ViolationSeverity.ERROR, "ARCHITECTURE_CONSTRAINT_VIOLATION", path,
                     edge.fromRole().layer() + " must not depend on " + edge.toRole().layer()
@@ -120,7 +133,7 @@ public class CheckEngine {
         return result;
     }
 
-    private List<String> logicalPaths(ChangedFile file) {
+    private List<String> logicalPaths(VerificationChange file) {
         return file.oldPath() == null ? List.of(file.path()) : List.of(file.oldPath(), file.path());
     }
 

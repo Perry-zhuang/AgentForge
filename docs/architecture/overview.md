@@ -129,7 +129,7 @@ CheckCommand
 
 Policy findings preserve each `PolicyEngine` violation from `DiffAuditReport`. Architecture compliance consumes only the changed-file architecture facts already produced by `DiffAuditService`; when no architecture contract is configured, Check reports `NOT CONFIGURED` without promoting lightweight observations to violations. ANALYSIS source checks reuse the same file-type classification used by `RepositoryScanner` and do not inspect file contents.
 
-P4 P0 uses `CURRENT_WORKING_TREE` as its verification baseline. It supports dirty repositories but cannot distinguish pre-existing changes from changes introduced by a particular Coding Agent execution. This attribution boundary is intentionally deferred; Check does not add an adapter, execution session, daemon, or `agentforge run` command.
+P4 P0 uses `CURRENT_WORKING_TREE` as its verification baseline. It supports dirty repositories but cannot distinguish pre-existing changes from changes introduced by a particular Coding Agent execution. That behavior and output remain the compatibility contract when `check` is invoked without a baseline.
 
 ## V0.2 P4 P1 Repository Baseline Flow
 
@@ -151,6 +151,29 @@ Capture is the repository fact boundary. It records the canonical Git root, bran
 
 The persisted snapshot schema is versioned deterministic JSON without timestamps, UUIDs, host identity, or file contents. Snapshot output and input are required to remain outside the target repository. P4 P1 reports branch and HEAD changes as facts and stops at `ExecutionChangeReport`; it does not alter the P4 P0 `CURRENT_WORKING_TREE` Check contract.
 
+## V0.2 P4 P2 Execution Check Flow
+
+```text
+CheckCommand --baseline
+    -> CheckService
+        -> PlanService.plan(...) exactly once
+        -> BaselineService.compare(...) exactly once
+            -> ExecutionChangeReport
+        -> PolicyEngine(execution files) exactly once
+        -> evidence-safe architecture attribution
+        -> VerificationChangeSet
+        -> CheckEngine
+            -> VerificationReport(EXECUTION_DELTA)
+```
+
+`VerificationChangeSet` only normalizes facts from `DiffAuditReport` or `ExecutionChangeReport`; it contains no scope, task-type, policy, architecture, or risk decisions. `CheckEngine` remains the single rule truth for both modes. Execution mode never invokes `DiffAuditService` and never falls back to whole-working-tree facts.
+
+Scope consumes every execution entry and checks rename old and new paths independently. ANALYSIS source compliance consumes only content-changing entries, so a pure staging change remains scope activity without becoming a source-content modification. Execution policy uses the existing `PolicyEngine`; each execution entry counts once for max-files, while rename old and new paths both participate in deny and protected matching.
+
+Architecture attribution is deliberately conservative because P4 P1 snapshots contain content identities rather than before-source or architecture graphs. A current contract violation may fail execution check only when its source file is an execution `ADDED` path, which proves the violating source did not exist in the baseline state. Current violations in modified or renamed existing files are excluded and reported as an attribution limitation. P4 P2 does not add architecture snapshots or claim those current violations were introduced by execution.
+
+Execution Check is read-only. Baseline/schema/repository/capture failures are invocation errors with exit code 2. Branch and HEAD changes are displayed as execution facts but do not create new P4 P2 violations.
+
 The command boundaries are:
 
 ```text
@@ -159,6 +182,6 @@ inspect = Locate known relevant files
 plan    = Organize known facts into a safe implementation plan
 prompt  = Package the engineering plan as deterministic Coding Agent instructions
 diff    = Evaluate current working-tree changes and policy risk
-check   = Verify current working-tree changes against a task-specific Engineering Boundary
+check   = Verify current working-tree or attributed execution changes against a task-specific Engineering Boundary
 baseline = Capture repository state and report a deterministic execution-window delta
 ```

@@ -44,6 +44,7 @@ import io.agentforge.scanner.ArchitectureScanner;
 import io.agentforge.scanner.ContextScanner;
 import io.agentforge.scanner.RepositoryScanner;
 import io.agentforge.verification.CheckEngine;
+import io.agentforge.verification.ExecutionArchitectureAttributor;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Map;
@@ -66,17 +67,19 @@ final class CliTestHarness {
                 configLoader, new TaskAnalyzer(), new RelevantFileEngine());
         InitService initService = new InitService();
         GitChangeScanner changeScanner = new GitChangeScanner(git, inspector);
+        PolicyEngine policyEngine = new PolicyEngine();
         DiffAuditService diffService = new DiffAuditService(changeScanner, repositoryScanner, architectureScanner,
-                configLoader, new PolicyEngine(), new MinimalChangeEngine(), new RiskEngine());
+                configLoader, policyEngine, new MinimalChangeEngine(), new RiskEngine());
         PlanService planService = new PlanService(inspectService, configLoader, changeScanner,
                 new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor()));
         PromptService promptService = new PromptService(planService, new PromptEngine());
-        CheckService checkService = new CheckService(planService, diffService, new CheckEngine());
+        BaselineService baselineService = new BaselineService(new RepositoryStateCapture(git, inspector),
+                new RepositorySnapshotStore(), new BaselineComparator());
+        CheckService checkService = new CheckService(planService, diffService, baselineService, configLoader,
+                policyEngine, new ExecutionArchitectureAttributor(), new CheckEngine());
         TextReportRenderer renderer = new TextReportRenderer();
         PromptRenderer promptRenderer = new PromptRenderer();
         CheckRenderer checkRenderer = new CheckRenderer();
-        BaselineService baselineService = new BaselineService(new RepositoryStateCapture(git, inspector),
-                new RepositorySnapshotStore(), new BaselineComparator());
         BaselineRenderer baselineRenderer = new BaselineRenderer();
 
         AuditCommand audit = new AuditCommand(auditService, renderer);

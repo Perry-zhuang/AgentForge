@@ -16,13 +16,17 @@ import org.springframework.stereotype.Component;
 @Component
 public class PolicyEngine {
     public PolicyReport evaluate(ChangeReport change, PolicyConfig config, ArchitectureReport architecture) {
+        return evaluate(change.files(), config, architecture);
+    }
+
+    public PolicyReport evaluate(List<ChangedFile> files, PolicyConfig config, ArchitectureReport architecture) {
         List<PolicyViolation> violations = new ArrayList<>();
-        if (change.files().size() > config.change().maxFiles()) {
+        if (files.size() > config.change().maxFiles()) {
             violations.add(new PolicyViolation(ViolationSeverity.ERROR, "change.max_files", "-",
-                    "Changed " + change.files().size() + " files; maximum is " + config.change().maxFiles()));
+                    "Changed " + files.size() + " files; maximum is " + config.change().maxFiles()));
         }
         Set<String> emitted = new LinkedHashSet<>();
-        for (ChangedFile file : change.files()) {
+        for (ChangedFile file : files) {
             for (String path : paths(file)) {
                 for (String pattern : config.change().deny()) {
                     addIfMatches(violations, emitted, path, pattern, "change.deny", "Denied file changed");
