@@ -1,7 +1,6 @@
 package io.agentforge.git;
 
 import io.agentforge.model.ChangeReport;
-import io.agentforge.model.ChangeStatus;
 import io.agentforge.model.ChangedFile;
 import io.agentforge.model.RepositoryInfo;
 import io.agentforge.scanner.RepositoryScanner;
@@ -48,38 +47,10 @@ public class GitChangeScanner {
     }
 
     List<ChangedFile> parsePorcelain(String output, String scope) {
-        List<ChangedFile> files = new ArrayList<>();
-        String[] tokens = output.split("\\u0000", -1);
-        for (int index = 0; index < tokens.length; index++) {
-            String token = tokens[index];
-            if (token.isEmpty() || token.length() < 3) continue;
-            String status = token.substring(0, 2);
-            String path = stripScope(token.substring(3), scope);
-            boolean renamed = status.indexOf('R') >= 0 || status.indexOf('C') >= 0;
-            String oldPath = null;
-            if (renamed && index + 1 < tokens.length) {
-                oldPath = stripScope(tokens[++index], scope);
-            }
-            ChangeStatus changeStatus = classifyStatus(status, renamed);
-            files.add(new ChangedFile(changeStatus, path, oldPath));
-        }
-        files.sort(Comparator.comparing(ChangedFile::path));
-        return files;
-    }
-
-    private ChangeStatus classifyStatus(String status, boolean renamed) {
-        if ("??".equals(status)) return ChangeStatus.UNTRACKED;
-        if (renamed) return ChangeStatus.RENAMED;
-        if (status.indexOf('D') >= 0) return ChangeStatus.DELETED;
-        if (status.indexOf('A') >= 0) return ChangeStatus.ADDED;
-        return ChangeStatus.MODIFIED;
-    }
-
-    private String stripScope(String gitPath, String scope) {
-        String normalized = gitPath.replace('\\', '/');
-        if (".".equals(scope)) return normalized;
-        String prefix = scope.endsWith("/") ? scope : scope + "/";
-        return normalized.startsWith(prefix) ? normalized.substring(prefix.length()) : normalized;
+        return GitStatusParser.parse(output, scope).stream()
+                .map(entry -> new ChangedFile(GitStatusParser.collapse(entry.porcelainStatus()),
+                        entry.path(), entry.oldPath()))
+                .toList();
     }
 
     private Set<String> findModuleRoots(Path target) {

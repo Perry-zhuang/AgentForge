@@ -107,6 +107,36 @@ class GitChangeScannerTest {
                 .contains("src/main/java/demo/security/Auth.java", "module/pom.xml");
     }
 
+    @Test
+    void sharedPorcelainParserPreservesIndexWorktreeAndRenameFactsIndependently() {
+        String output = " M unstaged.txt\0M  staged.txt\0R  new.txt\0old.txt\0?? untracked.txt\0";
+
+        var entries = GitStatusParser.parse(output, ".");
+
+        assertThat(entries).extracting(entry -> entry.porcelainStatus() + ":" + entry.path())
+                .containsExactly("R :new.txt", "M :staged.txt", " M:unstaged.txt", "??:untracked.txt");
+        assertThat(entries).filteredOn(entry -> entry.path().equals("new.txt")).singleElement()
+                .satisfies(entry -> {
+                    assertThat(entry.oldPath()).isEqualTo("old.txt");
+                    assertThat(entry.rename()).isTrue();
+                });
+    }
+
+    @Test
+    void gitClientDrainsLargeOutputWithoutPipeBufferTimeout(@TempDir Path root) throws Exception {
+        git(root, "init", "-b", "main");
+        for (int index = 0; index < 1800; index++) {
+            write(root, "generated/long-untracked-file-name-for-baseline-capture-" + index + ".txt", "x");
+        }
+
+        GitClient.Result result = new GitClient().run(root,
+                "ls-files", "-z", "--others", "--exclude-standard");
+
+        assertThat(result.succeeded()).isTrue();
+        assertThat(result.output().length()).isGreaterThan(64 * 1024);
+        assertThat(result.output()).contains("long-untracked-file-name-for-baseline-capture-1799.txt");
+    }
+
     private static void write(Path root, String relative, String content) throws Exception {
         Path file = root.resolve(relative);
         Files.createDirectories(file.getParent());

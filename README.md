@@ -4,12 +4,13 @@ AgentForge is a local AI Engineering control plane and repository governance CLI
 
 AgentForge does not write code. It analyzes the repository, a development task, and the current change before or after a Coding Agent works on it.
 
-V0.2 P4 P0 adds deterministic engineering-boundary verification on top of prompt delivery:
+V0.2 P4 P1 adds deterministic repository baselines and execution-delta reporting on top of boundary verification:
 
 - Task Inspection
 - Engineering Plan
 - Engineering Prompt
 - Engineering Boundary Check
+- Repository Baseline / Execution Delta
 - Repository Audit
 - Architecture Contract
 - Change Policy
@@ -31,6 +32,8 @@ java -Xss16m -jar target/agentforge.jar inspect /path/to/project "development ta
 java -Xss16m -jar target/agentforge.jar plan /path/to/project "development task"
 java -Xss16m -jar target/agentforge.jar prompt /path/to/project "development task"
 java -Xss16m -jar target/agentforge.jar check /path/to/project "development task"
+java -jar target/agentforge.jar baseline capture /path/to/project --output /tmp/agentforge-baseline.json
+java -jar target/agentforge.jar baseline compare /path/to/project --baseline /tmp/agentforge-baseline.json
 ```
 
 ## Commands
@@ -96,6 +99,21 @@ Check calls planning once, consumes the existing Diff facts, and does not rescan
 
 The P4 P0 baseline is `CURRENT_WORKING_TREE`. A dirty repository is supported, but Check cannot yet distinguish pre-existing dirty changes from changes introduced by a specific Coding Agent execution. PASS and WARNING return exit code 0, FAIL returns 1, and command/configuration errors return 2.
 
+### `agentforge baseline`
+
+Captures complete tracked state plus non-ignored untracked state, then compares a later repository state with that saved baseline:
+
+```bash
+java -jar target/agentforge.jar baseline capture /path/to/project --output /tmp/agentforge-baseline.json
+java -jar target/agentforge.jar baseline compare /path/to/project --baseline /tmp/agentforge-baseline.json
+```
+
+Snapshots contain a versioned, deterministic JSON representation of the canonical Git root, branch, HEAD, working-tree SHA-256 identities, index identities, and porcelain Git states. File content is never stored. Ignored files are excluded, binary files are hashed safely, and Gitlinks use parent-repository Git/index facts without scanning submodule contents.
+
+Comparison reports file content changes, Git-state-only changes, add/delete, and Git-confirmed rename facts. A rename already present when the baseline is captured is not attributed to the later execution window. Branch and HEAD changes are reported as facts. Both `EXECUTION DELTA NONE` and `EXECUTION DELTA CHANGED` return exit code 0; invalid invocation, snapshot, schema, repository identity, or file access returns 2.
+
+The baseline file must be outside the target repository. Capture and compare do not modify the target repository. P4 P1 only produces an `ExecutionChangeReport`; it is not yet connected to `agentforge check`.
+
 ### `agentforge audit`
 
 Scans repository technology, structure, AI context, architecture, and readiness, then reports the highest-value actions for improving Coding Agent readiness.
@@ -136,7 +154,7 @@ It does not guarantee detection of generic-wrapped dependencies, reflection, run
 
 `agentforge diff` audits the working tree against the current repository state. It includes staged, unstaged, untracked, deleted, and renamed files.
 
-`agentforge check` evaluates the same current working tree against a task-specific Engineering Boundary. It does not yet provide snapshot, commit, or execution-session attribution.
+`agentforge check` evaluates the same current working tree against a task-specific Engineering Boundary. P4 P1 can separately capture and compare execution-window state, but that `ExecutionChangeReport` is not connected to Check until a later phase.
 
 ### Architecture Diff
 
@@ -144,7 +162,7 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.2 P4 P0 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, prompt generation, and boundary verification are deterministic, rule-based, and explainable. Prompt packages existing engineering facts, while Check compares existing Plan and Diff facts without becoming a code-review or source-analysis layer.
+V0.2 P4 P1 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, prompt generation, boundary verification, snapshot capture, and execution-delta comparison are deterministic, local, and explainable. Prompt packages existing engineering facts, Check compares existing Plan and Diff facts, and Baseline compares immutable repository states without becoming an execution or code-review layer.
 
 ### Task Inspection
 

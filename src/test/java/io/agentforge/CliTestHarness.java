@@ -1,6 +1,7 @@
 package io.agentforge;
 
 import io.agentforge.application.AuditService;
+import io.agentforge.application.BaselineService;
 import io.agentforge.application.CheckService;
 import io.agentforge.application.DiffAuditService;
 import io.agentforge.application.InitService;
@@ -9,6 +10,8 @@ import io.agentforge.application.PlanService;
 import io.agentforge.application.PromptService;
 import io.agentforge.cli.AgentForgeCommand;
 import io.agentforge.cli.AuditCommand;
+import io.agentforge.cli.BaselineCommand;
+import io.agentforge.cli.BaselineRenderer;
 import io.agentforge.cli.CheckCommand;
 import io.agentforge.cli.CheckRenderer;
 import io.agentforge.cli.DiffCommand;
@@ -19,9 +22,12 @@ import io.agentforge.cli.PromptCommand;
 import io.agentforge.cli.PromptRenderer;
 import io.agentforge.cli.TextReportRenderer;
 import io.agentforge.config.ConfigLoader;
+import io.agentforge.baseline.BaselineComparator;
+import io.agentforge.baseline.RepositorySnapshotStore;
 import io.agentforge.git.GitChangeScanner;
 import io.agentforge.git.GitClient;
 import io.agentforge.git.GitRepositoryInspector;
+import io.agentforge.git.RepositoryStateCapture;
 import io.agentforge.policy.MinimalChangeEngine;
 import io.agentforge.policy.PolicyEngine;
 import io.agentforge.policy.ReadinessEngine;
@@ -69,6 +75,9 @@ final class CliTestHarness {
         TextReportRenderer renderer = new TextReportRenderer();
         PromptRenderer promptRenderer = new PromptRenderer();
         CheckRenderer checkRenderer = new CheckRenderer();
+        BaselineService baselineService = new BaselineService(new RepositoryStateCapture(git, inspector),
+                new RepositorySnapshotStore(), new BaselineComparator());
+        BaselineRenderer baselineRenderer = new BaselineRenderer();
 
         AuditCommand audit = new AuditCommand(auditService, renderer);
         InitCommand init = new InitCommand(initService, renderer);
@@ -77,6 +86,7 @@ final class CliTestHarness {
         PlanCommand plan = new PlanCommand(planService, renderer);
         PromptCommand prompt = new PromptCommand(promptService, promptRenderer);
         CheckCommand check = new CheckCommand(checkService, checkRenderer);
+        BaselineCommand baseline = new BaselineCommand(baselineService, baselineRenderer);
         Map<Class<?>, Object> components = Map.of(
                 AuditCommand.class, audit,
                 InitCommand.class, init,
@@ -84,7 +94,8 @@ final class CliTestHarness {
                 InspectCommand.class, inspect,
                 PlanCommand.class, plan,
                 PromptCommand.class, prompt,
-                CheckCommand.class, check);
+                CheckCommand.class, check,
+                BaselineCommand.class, baseline);
         CommandLine.IFactory factory = new CommandLine.IFactory() {
             @Override
             public <K> K create(Class<K> type) {

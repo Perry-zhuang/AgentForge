@@ -6,6 +6,8 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionException;
 import java.util.concurrent.TimeUnit;
 import org.springframework.stereotype.Component;
 
@@ -22,18 +24,28 @@ public class GitClient {
         Process process = null;
         try {
             process = new ProcessBuilder(command).redirectErrorStream(true).start();
+            Process running = process;
+            CompletableFuture<byte[]> outputFuture = CompletableFuture.supplyAsync(() -> {
+                try {
+                    return running.getInputStream().readAllBytes();
+                } catch (IOException exception) {
+                    throw new CompletionException(exception);
+                }
+            });
             boolean completed = process.waitFor(TIMEOUT.toMillis(), TimeUnit.MILLISECONDS);
             if (!completed) {
                 process.destroyForcibly();
                 return new Result(124, "", "Git command timed out after " + TIMEOUT.toSeconds() + " seconds");
             }
-            String output = new String(process.getInputStream().readAllBytes(), StandardCharsets.UTF_8);
+            String output = new String(outputFuture.join(), StandardCharsets.UTF_8);
             return new Result(process.exitValue(), output, process.exitValue() == 0 ? "" : output.strip());
         } catch (IOException exception) {
             return new Result(127, "", "Unable to execute Git: " + exception.getMessage());
         } catch (InterruptedException exception) {
             Thread.currentThread().interrupt();
             return new Result(130, "", "Git command interrupted");
+        } catch (CompletionException exception) {
+            return new Result(127, "", "Unable to read Git output: " + exception.getCause().getMessage());
         } finally {
             if (process != null) {
                 process.destroy();

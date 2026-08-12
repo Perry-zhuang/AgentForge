@@ -15,7 +15,7 @@ class CliIntegrationTest {
         CliTestHarness.Result version = CliTestHarness.execute("--version");
 
         assertThat(help.exitCode()).isZero();
-        assertThat(help.output()).contains("audit", "init", "diff", "inspect", "plan", "prompt", "check");
+        assertThat(help.output()).contains("audit", "init", "diff", "inspect", "plan", "prompt", "check", "baseline");
         assertThat(version.exitCode()).isZero();
         assertThat(version.output()).contains("AgentForge 0.2.0-SNAPSHOT");
     }

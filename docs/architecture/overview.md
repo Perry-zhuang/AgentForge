@@ -131,6 +131,26 @@ Policy findings preserve each `PolicyEngine` violation from `DiffAuditReport`. A
 
 P4 P0 uses `CURRENT_WORKING_TREE` as its verification baseline. It supports dirty repositories but cannot distinguish pre-existing changes from changes introduced by a particular Coding Agent execution. This attribution boundary is intentionally deferred; Check does not add an adapter, execution session, daemon, or `agentforge run` command.
 
+## V0.2 P4 P1 Repository Baseline Flow
+
+```text
+RepositoryStateCapture
+    -> complete tracked files + non-ignored untracked files
+    -> worktree SHA-256 + index identity + porcelain Git state
+    -> RepositorySnapshot
+
+RepositorySnapshot(before)
+    + RepositorySnapshot(after)
+    -> BaselineComparator
+    -> ExecutionChangeReport
+```
+
+Capture is the repository fact boundary. It records the canonical Git root, branch, HEAD, every tracked path, and non-ignored untracked paths. Worktree content identity, index identity, and the two-column porcelain state remain independent facts. Regular and binary files are hashed with streaming SHA-256, symlinks use link-target identity, and Gitlinks use only parent-repository Git/index facts without recursive submodule inspection.
+
+`BaselineComparator` is a pure immutable-state comparison. It does not read the repository, run Git, load configuration, or invoke Check. Dirty paths that retain identical content and Git state produce no execution delta; a dirty path whose content changes again produces `MODIFIED`. Git-confirmed renames are attributed only when introduced between snapshots. A rename already represented by the baseline produces no delta unless its new path changes again.
+
+The persisted snapshot schema is versioned deterministic JSON without timestamps, UUIDs, host identity, or file contents. Snapshot output and input are required to remain outside the target repository. P4 P1 reports branch and HEAD changes as facts and stops at `ExecutionChangeReport`; it does not alter the P4 P0 `CURRENT_WORKING_TREE` Check contract.
+
 The command boundaries are:
 
 ```text
@@ -140,4 +160,5 @@ plan    = Organize known facts into a safe implementation plan
 prompt  = Package the engineering plan as deterministic Coding Agent instructions
 diff    = Evaluate current working-tree changes and policy risk
 check   = Verify current working-tree changes against a task-specific Engineering Boundary
+baseline = Capture repository state and report a deterministic execution-window delta
 ```
