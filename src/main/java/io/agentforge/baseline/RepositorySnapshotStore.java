@@ -1,8 +1,10 @@
 package io.agentforge.baseline;
 
 import com.fasterxml.jackson.databind.DeserializationFeature;
+import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
+import io.agentforge.model.ExecutionBaseline;
 import io.agentforge.model.RepositorySnapshot;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -20,9 +22,19 @@ public class RepositorySnapshotStore {
 
     public Path write(RepositorySnapshot snapshot, Path requested, boolean force) {
         Path destination = validateDestination(snapshot.repositoryRoot(), requested, force);
+        return writeJson(snapshot, destination, force);
+    }
+
+    public Path writeExecution(ExecutionBaseline baseline, Path requested, boolean force) {
+        Path destination = validateDestination(
+                baseline.repositorySnapshot().repositoryRoot(), requested, force);
+        return writeJson(baseline, destination, force);
+    }
+
+    private Path writeJson(Object value, Path destination, boolean force) {
         String json;
         try {
-            json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(snapshot)
+            json = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(value)
                     .replace("\r\n", "\n") + "\n";
             if (force) {
                 Files.writeString(destination, json, StandardCharsets.UTF_8,
@@ -38,16 +50,64 @@ public class RepositorySnapshotStore {
         }
     }
 
+    public RepositorySnapshot readRepository(Path requested) {
+        BaselineDocument document = readDocument(requested);
+        if (document.schemaVersion() == RepositorySnapshot.CURRENT_SCHEMA_VERSION) {
+            RepositorySnapshot snapshot = convert(document, RepositorySnapshot.class);
+            requireCurrentRepositorySchema(snapshot);
+            return snapshot;
+        }
+        if (document.schemaVersion() == ExecutionBaseline.CURRENT_SCHEMA_VERSION) {
+            ExecutionBaseline baseline = convert(document, ExecutionBaseline.class);
+            requireCurrentExecutionSchema(baseline);
+            requireCurrentRepositorySchema(baseline.repositorySnapshot());
+            return baseline.repositorySnapshot();
+        }
+        throw new IllegalArgumentException("Unsupported baseline schema version: " + document.schemaVersion());
+    }
+
+    /** Backward-compatible repository-only view used by P4 P1 callers. */
     public RepositorySnapshot read(Path requested) {
+        return readRepository(requested);
+    }
+
+    public ExecutionBaseline readExecution(Path requested) {
+        BaselineDocument document = readDocument(requested);
+        if (document.schemaVersion() == RepositorySnapshot.CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException("Baseline does not contain an execution engineering boundary; "
+                    + "recapture baseline with --task TASK");
+        }
+        if (document.schemaVersion() != ExecutionBaseline.CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException("Unsupported baseline schema version: " + document.schemaVersion());
+        }
+        ExecutionBaseline baseline = convert(document, ExecutionBaseline.class);
+        requireCurrentExecutionSchema(baseline);
+        requireCurrentRepositorySchema(baseline.repositorySnapshot());
+        return baseline;
+    }
+
+    private BaselineDocument readDocument(Path requested) {
         Path source = requested.toAbsolutePath().normalize();
         if (!Files.exists(source)) throw new IllegalArgumentException("Baseline file does not exist: " + source);
         if (!Files.isRegularFile(source)) throw new IllegalArgumentException("Baseline path is not a file: " + source);
         try {
-            RepositorySnapshot snapshot = mapper.readValue(source.toFile(), RepositorySnapshot.class);
-            requireCurrentSchema(snapshot);
-            return snapshot;
+            JsonNode root = mapper.readTree(source.toFile());
+            JsonNode schema = root == null ? null : root.get("schemaVersion");
+            if (schema == null || !schema.canConvertToInt()) {
+                throw new IOException("schemaVersion is required and must be an integer");
+            }
+            return new BaselineDocument(source, schema.intValue(), root);
         } catch (IOException exception) {
             throw new IllegalArgumentException("Invalid baseline file " + source + ": "
+                    + exception.getMessage(), exception);
+        }
+    }
+
+    private <T> T convert(BaselineDocument document, Class<T> type) {
+        try {
+            return mapper.treeToValue(document.root(), type);
+        } catch (IOException exception) {
+            throw new IllegalArgumentException("Invalid baseline file " + document.source() + ": "
                     + exception.getMessage(), exception);
         }
     }
@@ -95,9 +155,18 @@ public class RepositorySnapshotStore {
         }
     }
 
-    private void requireCurrentSchema(RepositorySnapshot snapshot) {
+    private void requireCurrentRepositorySchema(RepositorySnapshot snapshot) {
         if (snapshot.schemaVersion() != RepositorySnapshot.CURRENT_SCHEMA_VERSION) {
-            throw new IllegalArgumentException("Unsupported baseline schema version: " + snapshot.schemaVersion());
+            throw new IllegalArgumentException("Unsupported repository snapshot schema version: "
+                    + snapshot.schemaVersion());
         }
     }
+
+    private void requireCurrentExecutionSchema(ExecutionBaseline baseline) {
+        if (baseline.schemaVersion() != ExecutionBaseline.CURRENT_SCHEMA_VERSION) {
+            throw new IllegalArgumentException("Unsupported baseline schema version: " + baseline.schemaVersion());
+        }
+    }
+
+    private record BaselineDocument(Path source, int schemaVersion, JsonNode root) {}
 }

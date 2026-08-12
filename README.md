@@ -34,7 +34,8 @@ java -Xss16m -jar target/agentforge.jar prompt /path/to/project "development tas
 java -Xss16m -jar target/agentforge.jar check /path/to/project "development task"
 java -jar target/agentforge.jar baseline capture /path/to/project --output /tmp/agentforge-baseline.json
 java -jar target/agentforge.jar baseline compare /path/to/project --baseline /tmp/agentforge-baseline.json
-java -Xss16m -jar target/agentforge.jar check /path/to/project "development task" --baseline /tmp/agentforge-baseline.json
+java -Xss16m -jar target/agentforge.jar baseline capture /path/to/project --task "development task" --output /tmp/agentforge-before.json
+java -Xss16m -jar target/agentforge.jar check /path/to/project "development task" --baseline /tmp/agentforge-before.json
 ```
 
 ## Commands
@@ -98,9 +99,9 @@ java -Xss16m -jar target/agentforge.jar check /path/to/project "fix backup alert
   --baseline /tmp/agentforge-before.json
 ```
 
-Check calls planning once, consumes the existing Diff facts, and does not rescan source or infer new architecture facts in `CheckEngine`. PRIMARY changes are allowed, SECONDARY changes require review, and REFERENCE or out-of-scope changes fail. For ANALYSIS tasks, recognized source-code changes fail independently of scope findings. Individual policy violations are preserved from the existing Policy result.
+Without `--baseline`, Check calls planning once, consumes the existing Diff facts, and does not rescan source or infer new architecture facts in `CheckEngine`. PRIMARY changes are allowed, SECONDARY changes require review, and REFERENCE or out-of-scope changes fail. For ANALYSIS tasks, recognized source-code changes fail independently of scope findings. Individual policy violations are preserved from the existing Policy result.
 
-Without `--baseline`, the P4 P0 baseline remains `CURRENT_WORKING_TREE` with its existing output and behavior. With `--baseline`, Check uses only `ExecutionChangeReport` entries introduced after that snapshot: historical dirty files that remain unchanged do not participate in scope, task-type, policy, or architecture compliance. Execution decisions are labeled `CHECK EXECUTION PASS/WARNING/FAIL`.
+Without `--baseline`, the P4 P0 baseline remains `CURRENT_WORKING_TREE` with its existing output and behavior. With `--baseline`, Check requires a task-aware schema 2 baseline and uses its pre-execution Scope, TaskType, resolved change policy, and Architecture contract together with only the `ExecutionChangeReport` entries introduced after that snapshot. It never replans or reloads execution-modified boundary configuration. Historical dirty files that remain unchanged do not participate in scope, task-type, policy, or architecture compliance. A repository-only schema 1 baseline is rejected for execution check with exit code 2. Execution decisions are labeled `CHECK EXECUTION PASS/WARNING/FAIL`.
 
 Execution policy evaluation reuses the existing max-files, denied-path, and protected-path rules over execution files only. A rename counts once for max-files while both old and new paths are checked. Git-state-only activity participates in scope and path policy, but does not count as ANALYSIS source-content modification. Architecture failures are evidence-safe: without architecture snapshots, a current violation is attributed to execution only when its source file was added during the execution window; existing-file changes are reported with an attribution limitation instead of being mislabeled.
 
@@ -112,12 +113,14 @@ Captures complete tracked state plus non-ignored untracked state, then compares 
 
 ```bash
 java -jar target/agentforge.jar baseline capture /path/to/project --output /tmp/agentforge-baseline.json
+java -Xss16m -jar target/agentforge.jar baseline capture /path/to/project --task "fix login 401" \
+  --output /tmp/agentforge-before.json
 java -jar target/agentforge.jar baseline compare /path/to/project --baseline /tmp/agentforge-baseline.json
 ```
 
-Snapshots contain a versioned, deterministic JSON representation of the canonical Git root, branch, HEAD, working-tree SHA-256 identities, index identities, and porcelain Git states. File content is never stored. Ignored files are excluded, binary files are hashed safely, and Gitlinks use parent-repository Git/index facts without scanning submodule contents.
+Repository-only schema 1 snapshots contain a versioned, deterministic JSON representation of the canonical Git root, branch, HEAD, working-tree SHA-256 identities, index identities, and porcelain Git states. Supplying `--task` creates a schema 2 execution baseline that wraps the same repository snapshot plus the minimal verification-relevant pre-execution engineering boundary. File content is never stored. Ignored files are excluded, binary files are hashed safely, and Gitlinks use parent-repository Git/index facts without scanning submodule contents.
 
-Comparison reports file content changes, Git-state-only changes, add/delete, and Git-confirmed rename facts. A rename already present when the baseline is captured is not attributed to the later execution window. Branch and HEAD changes are reported as facts. Both `EXECUTION DELTA NONE` and `EXECUTION DELTA CHANGED` return exit code 0; invalid invocation, snapshot, schema, repository identity, or file access returns 2.
+Comparison accepts either schema and compares only its repository snapshot. It reports file content changes, Git-state-only changes, add/delete, and Git-confirmed rename facts. A rename already present when the baseline is captured is not attributed to the later execution window. Branch and HEAD changes are reported as facts. Both `EXECUTION DELTA NONE` and `EXECUTION DELTA CHANGED` return exit code 0; invalid invocation, snapshot, schema, repository identity, or file access returns 2.
 
 The baseline file must be outside the target repository. Capture, compare, and execution check do not modify the target repository or the baseline file. P4 P2 consumes the existing `ExecutionChangeReport` without changing snapshot or delta semantics.
 

@@ -13,12 +13,177 @@ import org.junit.jupiter.api.io.TempDir;
 
 class ExecutionCheckCommandTest {
     @Test
+    void repositoryOnlyBaselineAndTaskMismatchFailExplicitlyWithoutCurrentPlanFallback(@TempDir Path temp)
+            throws Exception {
+        Path root = repository(temp.resolve("repo"));
+        Path repositoryOnly = temp.resolve("repository-only.json");
+        assertThat(CliTestHarness.execute("baseline", "capture", root.toString(),
+                "--output", repositoryOnly.toString()).exitCode()).isZero();
+        Path taskAware = capture(root, "修复登录异常", temp.resolve("task-aware.json"));
+
+        CliTestHarness.Result missingBoundary = executionCheck(root, "修复登录异常", repositoryOnly);
+        CliTestHarness.Result mismatch = executionCheck(root, "分析登录流程", taskAware);
+
+        assertThat(missingBoundary.exitCode()).isEqualTo(2);
+        assertThat(missingBoundary.output()).contains(
+                "does not contain an execution engineering boundary",
+                "recapture baseline with --task TASK").doesNotContain("CHECK EXECUTION FAIL");
+        assertThat(mismatch.exitCode()).isEqualTo(2);
+        assertThat(mismatch.output()).contains("Baseline task does not match requested task")
+                .doesNotContain("CHECK EXECUTION FAIL");
+    }
+
+    @Test
+    void afterExecutionPlanDriftCannotLegalizeNewTaskRelevantSource(@TempDir Path temp) throws Exception {
+        Path root = repository(temp.resolve("repo"));
+        String task = "修复登录异常";
+        Path baseline = capture(root, task, temp.resolve("before.json"));
+        String evilPath = "src/main/java/demo/OutsideEvilService.java";
+        write(root, evilPath, """
+                package demo;
+                import org.springframework.stereotype.Service;
+                @Service class OutsideEvilService {
+                    // 登录 登录 登录 异常 异常 token auth login exception
+                    void repairLoginAuthTokenException() { }
+                }
+                """);
+
+        CliTestHarness.Result afterPlan = CliTestHarness.execute("plan", root.toString(), task);
+        CliTestHarness.Result result = executionCheck(root, task, baseline);
+        String primary = afterPlan.output().substring(afterPlan.output().indexOf("PRIMARY —"),
+                afterPlan.output().indexOf("SECONDARY —"));
+
+        assertThat(afterPlan.exitCode()).isZero();
+        assertThat(primary).contains(evilPath);
+        assertThat(result.exitCode()).isEqualTo(1);
+        assertThat(result.output()).contains(
+                "ADDED " + evilPath,
+                "OUT_OF_SCOPE_MODIFICATION " + evilPath,
+                "CHECK EXECUTION FAIL");
+    }
+
+    @Test
+    void compatiblePrimaryRenameUsesBaselineEntityScope(@TempDir Path temp) throws Exception {
+        Path root = repository(temp.resolve("repo"));
+        String task = "修复登录异常";
+        Path baseline = capture(root, task, temp.resolve("before.json"));
+        git(root, "mv", "src/main/java/demo/LoginService.java",
+                "src/main/java/demo/LoginRenamedService.java");
+
+        CliTestHarness.Result result = executionCheck(root, task, baseline);
+
+        assertThat(result.exitCode()).isZero();
+        assertThat(result.output()).contains(
+                "RENAMED src/main/java/demo/LoginService.java -> src/main/java/demo/LoginRenamedService.java",
+                "CHECK EXECUTION PASS").doesNotContain("OUT_OF_SCOPE_MODIFICATION");
+    }
+
+    @Test
+    void baselineAnalysisTaskAndPolicyCannotBeRelaxedByExecution(@TempDir Path temp) throws Exception {
+        Path analysisRoot = repository(temp.resolve("analysis"));
+        Path analysisBaseline = capture(analysisRoot, "分析登录流程", temp.resolve("analysis.json"));
+        write(analysisRoot, "src/main/java/demo/LoginGeneratedService.java", """
+                package demo;
+                class LoginGeneratedService { // 登录 流程 分析
+                }
+                """);
+
+        CliTestHarness.Result analysis = executionCheck(
+                analysisRoot, "分析登录流程", analysisBaseline);
+
+        assertThat(analysis.exitCode()).isEqualTo(1);
+        assertThat(analysis.output()).contains(
+                "Task Type                ANALYSIS",
+                "ANALYSIS_SOURCE_MODIFICATION",
+                "CHECK EXECUTION FAIL");
+
+        Path policyRoot = repository(temp.resolve("policy"));
+        write(policyRoot, ".agentforge/policies.yaml", policyYaml(20, "[]"));
+        Path policyBaseline = capture(policyRoot, "修复登录异常", temp.resolve("policy.json"));
+        write(policyRoot, ".agentforge/policies.yaml", policyYaml(100, "[]"));
+        for (int index = 0; index < 20; index++) {
+            write(policyRoot, "generated/File" + index + ".txt", "execution\n");
+        }
+
+        CliTestHarness.Result relaxed = executionCheck(policyRoot, "修复登录异常", policyBaseline);
+
+        assertThat(relaxed.exitCode()).isEqualTo(1);
+        assertThat(relaxed.output()).contains(
+                "Execution Files          21",
+                "Changed 21 files; maximum is 20",
+                "CHECK EXECUTION FAIL").doesNotContain("maximum is 100");
+    }
+
+    @Test
+    void baselineDeniedRuleAndArchitectureContractCannotBeRelaxedByExecution(@TempDir Path temp)
+            throws Exception {
+        Path deniedRoot = repository(temp.resolve("denied"));
+        write(deniedRoot, ".agentforge/policies.yaml", policyYaml(20, "[\"secret/**\"]"));
+        Path deniedBaseline = capture(deniedRoot, "修复登录异常", temp.resolve("denied.json"));
+        write(deniedRoot, ".agentforge/policies.yaml", policyYaml(20, "[]"));
+        write(deniedRoot, "secret/blocked.txt", "execution\n");
+
+        CliTestHarness.Result denied = executionCheck(deniedRoot, "修复登录异常", deniedBaseline);
+
+        assertThat(denied.exitCode()).isEqualTo(1);
+        assertThat(denied.output()).contains(
+                "change.deny secret/blocked.txt",
+                "pattern: secret/**",
+                "CHECK EXECUTION FAIL");
+
+        Path protectedRoot = repository(temp.resolve("protected"));
+        write(protectedRoot, ".agentforge/policies.yaml",
+                policyYaml(20, "[]", "[\"protected/**\"]"));
+        Path protectedBaseline = capture(
+                protectedRoot, "修复登录异常", temp.resolve("protected.json"));
+        write(protectedRoot, ".agentforge/policies.yaml", policyYaml(20, "[]", "[]"));
+        write(protectedRoot, "protected/blocked.txt", "execution\n");
+
+        CliTestHarness.Result protectedResult = executionCheck(
+                protectedRoot, "修复登录异常", protectedBaseline);
+
+        assertThat(protectedResult.exitCode()).isEqualTo(1);
+        assertThat(protectedResult.output()).contains(
+                "change.protected protected/blocked.txt",
+                "pattern: protected/**",
+                "CHECK EXECUTION FAIL");
+
+        Path architectureRoot = architectureRepository(temp.resolve("architecture"), false);
+        Path architectureBaseline = capture(
+                architectureRoot, "fix LoginController", temp.resolve("architecture.json"));
+        write(architectureRoot, ".agentforge/architecture.yaml", """
+                schema_version: 1
+                architecture:
+                  layers: [controller, service, repository, mapper]
+                  rules:
+                    controller:
+                      allow_dependencies: [service, mapper]
+                    service:
+                      allow_dependencies: [repository, mapper]
+                    repository:
+                      allow_dependencies: []
+                    mapper:
+                      allow_dependencies: []
+                """);
+        write(architectureRoot, "src/main/java/demo/LoginController.java", controllerSource());
+
+        CliTestHarness.Result architecture = executionCheck(
+                architectureRoot, "fix LoginController", architectureBaseline);
+
+        assertThat(architecture.exitCode()).isEqualTo(1);
+        assertThat(architecture.output()).contains(
+                "ARCHITECTURE_CONSTRAINT_VIOLATION",
+                "controller must not depend on mapper",
+                "CHECK EXECUTION FAIL");
+    }
+
+    @Test
     void dirtyAnalysisRepositoryHasDifferentCurrentAndExecutionResultsWithoutMutation(@TempDir Path temp)
             throws Exception {
         Path root = repository(temp.resolve("repo"));
         append(root.resolve("src/main/java/demo/LoginService.java"), "// historical login change\n");
         append(root.resolve("src/main/java/demo/OutsideService.java"), "// historical outside change\n");
-        Path baseline = capture(root, temp.resolve("before.json"));
+        Path baseline = capture(root, "分析登录流程", temp.resolve("before.json"));
         String branchBefore = gitOutput(root, "branch", "--show-current");
         String headBefore = gitOutput(root, "rev-parse", "HEAD");
         String statusBefore = gitOutput(root, "status", "--porcelain=v1", "--untracked-files=all");
@@ -57,7 +222,7 @@ class ExecutionCheckCommandTest {
     void historicalOutOfScopePathOnlyFailsAfterItIsModifiedAgain(@TempDir Path temp) throws Exception {
         Path root = repository(temp.resolve("repo"));
         append(root.resolve("src/main/java/demo/OutsideService.java"), "// dirty before\n");
-        Path baseline = capture(root, temp.resolve("before.json"));
+        Path baseline = capture(root, "修复登录异常", temp.resolve("before.json"));
 
         CliTestHarness.Result unchanged = executionCheck(root, "修复登录异常", baseline);
         append(root.resolve("src/main/java/demo/OutsideService.java"), "// modified again\n");
@@ -80,7 +245,7 @@ class ExecutionCheckCommandTest {
         for (int index = 0; index < 42; index++) {
             write(isolatedRoot, "historical/File" + index + ".txt", "dirty before\n");
         }
-        Path isolatedBaseline = capture(isolatedRoot, temp.resolve("isolated.json"));
+        Path isolatedBaseline = capture(isolatedRoot, "修复登录异常", temp.resolve("isolated.json"));
         append(isolatedRoot.resolve("src/main/java/demo/LoginService.java"), "// execution change\n");
 
         CliTestHarness.Result isolated = executionCheck(isolatedRoot, "修复登录异常", isolatedBaseline);
@@ -90,7 +255,7 @@ class ExecutionCheckCommandTest {
                 .doesNotContain("change.max_files", "Changed 43 files");
 
         Path exceededRoot = repository(temp.resolve("exceeded"));
-        Path exceededBaseline = capture(exceededRoot, temp.resolve("exceeded.json"));
+        Path exceededBaseline = capture(exceededRoot, "修复登录异常", temp.resolve("exceeded.json"));
         for (int index = 0; index < 21; index++) {
             write(exceededRoot, "generated/File" + index + ".txt", "execution\n");
         }
@@ -110,7 +275,7 @@ class ExecutionCheckCommandTest {
         Path root = repository(temp.resolve("repo"));
         Path source = root.resolve("src/main/java/demo/LoginService.java");
         append(source, "// dirty before baseline\n");
-        Path baseline = capture(root, temp.resolve("before.json"));
+        Path baseline = capture(root, "分析登录流程", temp.resolve("before.json"));
         git(root, "add", "src/main/java/demo/LoginService.java");
 
         CliTestHarness.Result result = executionCheck(root, "分析登录流程", baseline);
@@ -128,7 +293,7 @@ class ExecutionCheckCommandTest {
             throws Exception {
         Path first = repository(temp.resolve("first"));
         Path second = repository(temp.resolve("second"));
-        Path baseline = capture(first, temp.resolve("first.json"));
+        Path baseline = capture(first, "修复登录异常", temp.resolve("first.json"));
         Path invalid = temp.resolve("invalid.json");
         Files.writeString(invalid, "{invalid}");
         Path internal = first.resolve("inside.json");
@@ -152,7 +317,7 @@ class ExecutionCheckCommandTest {
     @Test
     void modifiedExistingArchitectureViolationIsLimitedButNotAttributed(@TempDir Path temp) throws Exception {
         Path root = architectureRepository(temp.resolve("repo"), true);
-        Path baseline = capture(root, temp.resolve("before.json"));
+        Path baseline = capture(root, "fix LoginController", temp.resolve("before.json"));
         append(root.resolve("src/main/java/demo/LoginController.java"), "// changed existing source\n");
 
         CliTestHarness.Result result = executionCheck(root, "fix LoginController", baseline);
@@ -167,7 +332,7 @@ class ExecutionCheckCommandTest {
     @Test
     void violationFromAddedArchitectureSourceIsExecutionAttributed(@TempDir Path temp) throws Exception {
         Path root = architectureRepository(temp.resolve("repo"), false);
-        Path baseline = capture(root, temp.resolve("before.json"));
+        Path baseline = capture(root, "fix LoginController", temp.resolve("before.json"));
         write(root, "src/main/java/demo/LoginController.java", controllerSource());
 
         CliTestHarness.Result result = executionCheck(root, "fix LoginController", baseline);
@@ -240,9 +405,84 @@ class ExecutionCheckCommandTest {
                 """;
     }
 
-    private static Path capture(Path root, Path baseline) {
+    private static String policyYaml(int maxFiles, String deny) {
+        return policyYaml(maxFiles, deny, "[]");
+    }
+
+    private static String policyYaml(int maxFiles, String deny, String protectedPaths) {
+        return """
+                schema_version: 1
+                change:
+                  max_files: %d
+                  deny: %s
+                  protected: %s
+                minimal_change:
+                  free_files: 5
+                  per_extra_file: 2
+                  max_file_penalty: 30
+                  free_modules: 1
+                  per_extra_module: 8
+                  max_module_penalty: 24
+                  config_change_penalty: 10
+                  dependency_change_penalty: 15
+                  database_change_penalty: 15
+                  security_change_penalty: 20
+                  agents_change_penalty: 10
+                risk:
+                  medium_threshold: 20
+                  high_threshold: 40
+                  critical_threshold: 70
+                  max_modules: 3
+                  policy_violation: 30
+                  dependency_change: 15
+                  security_change: 20
+                  database_change: 15
+                  files_over_limit: 20
+                  modules_over_limit: 10
+                  controller_change: 10
+                  agents_change: 10
+                  config_change: 5
+                readiness:
+                  context:
+                    agents: 35
+                    readme: 15
+                    skills: 10
+                    agent_rules: 10
+                    git_rules: 10
+                    database_rules: 5
+                    api_rules: 5
+                    testing_rules: 10
+                    agents_too_large_penalty: 10
+                    agents_max_lines: 300
+                  architecture:
+                    architecture_doc: 40
+                    architecture_contract: 35
+                    recognizable_structure: 10
+                    no_layer_bypass: 15
+                  change_safety:
+                    policies: 40
+                    gitignore: 15
+                    git_repository: 15
+                    git_rules: 10
+                    database_rules: 10
+                    api_rules: 10
+                  testability:
+                    tests_present: 60
+                    test_ratio: 25
+                    testing_rules: 15
+                    minimum_test_ratio: 0.10
+                  documentation:
+                    readme: 35
+                    architecture_doc: 35
+                    agents: 20
+                    docs_directory: 10
+                """.formatted(maxFiles, deny, protectedPaths);
+    }
+
+    private static Path capture(Path root, String task, Path baseline) {
         CliTestHarness.Result capture = CliTestHarness.execute(
-                "baseline", "capture", root.toString(), "--output", baseline.toString());
+                "baseline", "capture", root.toString(), "--task", task,
+                "--output", baseline.toString());
         assertThat(capture.exitCode()).isZero();
         return baseline;
     }

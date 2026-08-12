@@ -149,28 +149,32 @@ Capture is the repository fact boundary. It records the canonical Git root, bran
 
 `BaselineComparator` is a pure immutable-state comparison. It does not read the repository, run Git, load configuration, or invoke Check. Dirty paths that retain identical content and Git state produce no execution delta; a dirty path whose content changes again produces `MODIFIED`. Git-confirmed renames are attributed only when introduced between snapshots. A rename already represented by the baseline produces no delta unless its new path changes again.
 
-The persisted snapshot schema is versioned deterministic JSON without timestamps, UUIDs, host identity, or file contents. Snapshot output and input are required to remain outside the target repository. P4 P1 reports branch and HEAD changes as facts and stops at `ExecutionChangeReport`; it does not alter the P4 P0 `CURRENT_WORKING_TREE` Check contract.
+The repository-only schema 1 snapshot remains versioned deterministic JSON without timestamps, UUIDs, host identity, or file contents. A task-aware schema 2 execution baseline wraps that unchanged repository snapshot plus `EngineeringBoundarySnapshot`. Baseline compare accepts either schema and compares only repository snapshots. Snapshot output and input are required to remain outside the target repository. P4 P1 reports branch and HEAD changes as facts and stops at `ExecutionChangeReport`; it does not alter the P4 P0 `CURRENT_WORKING_TREE` Check contract.
 
 ## V0.2 P4 P2 Execution Check Flow
 
 ```text
 CheckCommand --baseline
     -> CheckService
-        -> PlanService.plan(...) exactly once
-        -> BaselineService.compare(...) exactly once
+        -> ExecutionBaselineService.compare(...) exactly once
+            -> schema 2 EngineeringBoundarySnapshot
             -> ExecutionChangeReport
         -> PolicyEngine(execution files) exactly once
-        -> evidence-safe architecture attribution
+            using baseline change policy
+        -> ArchitectureScanner(current facts, baseline contract)
+        -> evidence-safe execution attribution
         -> VerificationChangeSet
         -> CheckEngine
             -> VerificationReport(EXECUTION_DELTA)
 ```
 
-`VerificationChangeSet` only normalizes facts from `DiffAuditReport` or `ExecutionChangeReport`; it contains no scope, task-type, policy, architecture, or risk decisions. `CheckEngine` remains the single rule truth for both modes. Execution mode never invokes `DiffAuditService` and never falls back to whole-working-tree facts.
+Task-aware capture computes the Engineering Boundary before execution. `EngineeringBoundarySnapshot` stores only normalized task identity, TaskType, PRIMARY/SECONDARY/REFERENCE paths, resolved change-policy facts, policy-source fact, architecture analysis mode, and the resolved Architecture contract. It contains no compliance findings, plan risk, confidence, recommendations, related flow, prompt content, or architecture graph snapshot.
 
-Scope consumes every execution entry and checks rename old and new paths independently. ANALYSIS source compliance consumes only content-changing entries, so a pure staging change remains scope activity without becoming a source-content modification. Execution policy uses the existing `PolicyEngine`; each execution entry counts once for max-files, while rename old and new paths both participate in deny and protected matching.
+`VerificationChangeSet` only normalizes facts from `DiffAuditReport` or `ExecutionChangeReport`; it computes no scope, task-type, policy, architecture, or risk decisions. Execution mode does not call `PlanService`, reload current policy or Architecture configuration, invoke `DiffAuditService`, or fall back to whole-working-tree facts. A schema 1 repository-only baseline or a task identity mismatch fails explicitly with exit code 2.
 
-Architecture attribution is deliberately conservative because P4 P1 snapshots contain content identities rather than before-source or architecture graphs. A current contract violation may fail execution check only when its source file is an execution `ADDED` path, which proves the violating source did not exist in the baseline state. Current violations in modified or renamed existing files are excluded and reported as an attribution limitation. P4 P2 does not add architecture snapshots or claim those current violations were introduced by execution.
+Scope consumes every execution entry using the baseline-time paths. Rename oldPath always uses its exact baseline classification. A destination that is an explicit baseline Scope path uses that classification; an otherwise-new destination inherits the old scoped entity only for a same-parent compatible rename, while moves elsewhere remain outside. An outside oldPath remains failing even when the destination is PRIMARY. ANALYSIS source compliance consumes only content-changing entries, so a pure staging change remains scope activity without becoming a source-content modification. Execution policy uses the existing `PolicyEngine` with the baseline-time change policy; each execution entry counts once for max-files, while rename old and new paths both participate in deny and protected matching.
+
+Architecture attribution is deliberately conservative because baselines contain content identities and the baseline contract, but not before-source or architecture graphs. The current graph is evaluated against the baseline-time contract. A current contract violation may fail execution check only when its source file is an execution `ADDED` path, which proves the violating source did not exist in the baseline state. Current violations in modified or renamed existing files are excluded and reported as an attribution limitation. P4 P2.1 does not add architecture graph snapshots or claim those current violations were introduced by execution.
 
 Execution Check is read-only. Baseline/schema/repository/capture failures are invocation errors with exit code 2. Branch and HEAD changes are displayed as execution facts but do not create new P4 P2 violations.
 

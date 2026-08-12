@@ -4,6 +4,7 @@ import io.agentforge.application.AuditService;
 import io.agentforge.application.BaselineService;
 import io.agentforge.application.CheckService;
 import io.agentforge.application.DiffAuditService;
+import io.agentforge.application.ExecutionBaselineService;
 import io.agentforge.application.InitService;
 import io.agentforge.application.InspectService;
 import io.agentforge.application.PlanService;
@@ -73,10 +74,15 @@ final class CliTestHarness {
         PlanService planService = new PlanService(inspectService, configLoader, changeScanner,
                 new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor()));
         PromptService promptService = new PromptService(planService, new PromptEngine());
-        BaselineService baselineService = new BaselineService(new RepositoryStateCapture(git, inspector),
-                new RepositorySnapshotStore(), new BaselineComparator());
-        CheckService checkService = new CheckService(planService, diffService, baselineService, configLoader,
-                policyEngine, new ExecutionArchitectureAttributor(), new CheckEngine());
+        RepositoryStateCapture stateCapture = new RepositoryStateCapture(git, inspector);
+        RepositorySnapshotStore snapshotStore = new RepositorySnapshotStore();
+        BaselineComparator baselineComparator = new BaselineComparator();
+        BaselineService baselineService = new BaselineService(stateCapture, snapshotStore, baselineComparator);
+        ExecutionBaselineService executionBaselineService = new ExecutionBaselineService(planService, configLoader,
+                stateCapture, snapshotStore, baselineComparator);
+        CheckService checkService = new CheckService(planService, diffService, executionBaselineService,
+                repositoryScanner, architectureScanner, policyEngine,
+                new ExecutionArchitectureAttributor(), new CheckEngine());
         TextReportRenderer renderer = new TextReportRenderer();
         PromptRenderer promptRenderer = new PromptRenderer();
         CheckRenderer checkRenderer = new CheckRenderer();
@@ -89,7 +95,7 @@ final class CliTestHarness {
         PlanCommand plan = new PlanCommand(planService, renderer);
         PromptCommand prompt = new PromptCommand(promptService, promptRenderer);
         CheckCommand check = new CheckCommand(checkService, checkRenderer);
-        BaselineCommand baseline = new BaselineCommand(baselineService, baselineRenderer);
+        BaselineCommand baseline = new BaselineCommand(baselineService, executionBaselineService, baselineRenderer);
         Map<Class<?>, Object> components = Map.of(
                 AuditCommand.class, audit,
                 InitCommand.class, init,

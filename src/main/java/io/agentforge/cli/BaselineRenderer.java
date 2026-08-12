@@ -1,6 +1,7 @@
 package io.agentforge.cli;
 
 import io.agentforge.application.BaselineService.CaptureResult;
+import io.agentforge.application.ExecutionBaselineService;
 import io.agentforge.model.ExecutionChangeReport;
 import io.agentforge.model.ExecutionChangeReport.ExecutionChange;
 import java.util.Locale;
@@ -22,6 +23,36 @@ public class BaselineRenderer {
         row(out, "Output", result.destination());
         section(out, "Decision");
         out.append("BASELINE CAPTURED\n");
+        return out.toString();
+    }
+
+    public String capture(ExecutionBaselineService.CaptureResult result) {
+        StringBuilder out = new StringBuilder("AgentForge Baseline\n");
+        section(out, "Repository Snapshot");
+        row(out, "Repository", result.baseline().repositorySnapshot().repositoryRoot());
+        row(out, "Branch", result.baseline().repositorySnapshot().branch());
+        row(out, "HEAD", result.baseline().repositorySnapshot().head());
+        row(out, "Schema Version", result.baseline().schemaVersion());
+        row(out, "Repository Schema", result.baseline().repositorySnapshot().schemaVersion());
+        row(out, "Files", result.baseline().repositorySnapshot().files().size());
+        row(out, "Tracked", result.baseline().repositorySnapshot().files().stream()
+                .filter(file -> file.tracked()).count());
+        row(out, "Untracked", result.baseline().repositorySnapshot().files().stream()
+                .filter(file -> !file.tracked()).count());
+        row(out, "Ignored Files", "EXCLUDED");
+        row(out, "Output", result.destination());
+
+        section(out, "Engineering Boundary");
+        row(out, "Task", result.baseline().engineeringBoundary().task());
+        row(out, "Task Type", result.baseline().engineeringBoundary().taskType());
+        row(out, "PRIMARY", result.baseline().engineeringBoundary().primaryPaths().size());
+        row(out, "SECONDARY", result.baseline().engineeringBoundary().secondaryPaths().size());
+        row(out, "REFERENCE", result.baseline().engineeringBoundary().referencePaths().size());
+        row(out, "Policy Max Files", result.baseline().engineeringBoundary().changePolicy().maxFiles());
+        row(out, "Architecture Contract", result.baseline().engineeringBoundary().contractConfigured()
+                ? "CONFIGURED" : "NOT CONFIGURED");
+        section(out, "Decision");
+        out.append("TASK-AWARE BASELINE CAPTURED\n");
         return out.toString();
     }
 

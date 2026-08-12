@@ -10,8 +10,8 @@ import static org.mockito.Mockito.when;
 import io.agentforge.application.BaselineService;
 import io.agentforge.application.CheckService;
 import io.agentforge.application.DiffAuditService;
+import io.agentforge.application.ExecutionBaselineService;
 import io.agentforge.application.PlanService;
-import io.agentforge.config.ConfigLoader;
 import io.agentforge.model.ArchitectureAnalysisMode;
 import io.agentforge.model.ArchitectureReport;
 import io.agentforge.model.ChangeReport;
@@ -19,9 +19,12 @@ import io.agentforge.model.DependencyGraph;
 import io.agentforge.model.DiffAuditReport;
 import io.agentforge.model.EngineeringPlan;
 import io.agentforge.model.EngineeringPlanRequest;
+import io.agentforge.model.EngineeringBoundarySnapshot;
 import io.agentforge.model.ExecutionChangeReport;
 import io.agentforge.model.PolicyReport;
+import io.agentforge.model.PolicyConfig;
 import io.agentforge.model.RepositoryInfo;
+import io.agentforge.model.RepositorySnapshot;
 import io.agentforge.model.RiskLevel;
 import io.agentforge.model.RiskReport;
 import io.agentforge.model.ScoreBreakdown;
@@ -29,6 +32,8 @@ import io.agentforge.model.TaskType;
 import io.agentforge.model.VerificationRequest;
 import io.agentforge.model.VerificationReport;
 import io.agentforge.policy.PolicyEngine;
+import io.agentforge.scanner.ArchitectureScanner;
+import io.agentforge.scanner.RepositoryScanner;
 import io.agentforge.verification.CheckEngine;
 import io.agentforge.verification.ExecutionArchitectureAttributor;
 import java.nio.file.Path;
@@ -47,12 +52,13 @@ class CheckServiceTest {
         EngineeringPlanRequest planRequest = new EngineeringPlanRequest(Path.of("."), "修复任务异常");
         when(planService.plan(planRequest)).thenReturn(plan);
         when(diffService.audit(plan.repository().repository().path())).thenReturn(diff);
-        BaselineService baselineService = mock(BaselineService.class);
-        ConfigLoader configLoader = mock(ConfigLoader.class);
+        ExecutionBaselineService executionBaselineService = mock(ExecutionBaselineService.class);
+        RepositoryScanner repositoryScanner = mock(RepositoryScanner.class);
+        ArchitectureScanner architectureScanner = mock(ArchitectureScanner.class);
         PolicyEngine policyEngine = mock(PolicyEngine.class);
         ExecutionArchitectureAttributor architectureAttributor = mock(ExecutionArchitectureAttributor.class);
-        CheckService service = new CheckService(planService, diffService, baselineService, configLoader,
-                policyEngine, architectureAttributor, new CheckEngine());
+        CheckService service = new CheckService(planService, diffService, executionBaselineService,
+                repositoryScanner, architectureScanner, policyEngine, architectureAttributor, new CheckEngine());
 
         var report = service.check(new VerificationRequest(Path.of("."), "修复任务异常"));
 
@@ -61,15 +67,17 @@ class CheckServiceTest {
         verify(planService).plan(planRequest);
         verify(diffService).audit(plan.repository().repository().path());
         verifyNoMoreInteractions(planService, diffService);
-        verifyNoInteractions(baselineService, configLoader, policyEngine, architectureAttributor);
+        verifyNoInteractions(executionBaselineService, repositoryScanner, architectureScanner,
+                policyEngine, architectureAttributor);
     }
 
     @Test
     void executionModeUsesEachExecutionFactSourceOnceAndNeverAuditsWholeWorkingTree() {
         PlanService planService = mock(PlanService.class);
         DiffAuditService diffService = mock(DiffAuditService.class);
-        BaselineService baselineService = mock(BaselineService.class);
-        ConfigLoader configLoader = mock(ConfigLoader.class);
+        ExecutionBaselineService executionBaselineService = mock(ExecutionBaselineService.class);
+        RepositoryScanner repositoryScanner = mock(RepositoryScanner.class);
+        ArchitectureScanner architectureScanner = mock(ArchitectureScanner.class);
         PolicyEngine policyEngine = mock(PolicyEngine.class);
         ExecutionArchitectureAttributor architectureAttributor = mock(ExecutionArchitectureAttributor.class);
         EngineeringPlan plan = PromptTestFixtures.plan(TaskType.BUGFIX);
@@ -77,34 +85,40 @@ class CheckServiceTest {
         Path baselineFile = Path.of("/tmp/check-before.json");
         ExecutionChangeReport execution = new ExecutionChangeReport(root.toString(), "main", "main", false,
                 plan.repository().repository().head(), plan.repository().repository().head(), false, List.of());
-        ConfigLoader.LoadedPolicy loadedPolicy = new ConfigLoader().loadPolicy(root);
+        PolicyConfig.ChangePolicy changePolicy = new PolicyConfig.ChangePolicy(20, List.of(), List.of());
+        EngineeringBoundarySnapshot boundary = new EngineeringBoundarySnapshot(
+                "修复任务异常", TaskType.BUGFIX,
+                plan.scope().primary().stream().map(file -> file.path()).toList(),
+                plan.scope().secondary().stream().map(file -> file.path()).toList(),
+                plan.scope().reference().stream().map(file -> file.path()).toList(),
+                changePolicy, true, ArchitectureAnalysisMode.LIGHTWEIGHT, null);
+        RepositorySnapshot current = new RepositorySnapshot(RepositorySnapshot.CURRENT_SCHEMA_VERSION,
+                root.toString(), "main", plan.repository().repository().head(), List.of());
         ArchitectureReport architecture = plan.repository().architecture();
         ExecutionArchitectureAttributor.Result attribution =
                 new ExecutionArchitectureAttributor.Result(architecture, List.of());
         PolicyReport policy = new PolicyReport(List.of());
-        EngineeringPlanRequest planRequest = new EngineeringPlanRequest(Path.of("."), "修复任务异常");
         List<io.agentforge.model.ChangedFile> policyChanges = List.of();
-        when(planService.plan(planRequest)).thenReturn(plan);
-        when(baselineService.compare(root, baselineFile)).thenReturn(execution);
-        when(configLoader.loadPolicy(root)).thenReturn(loadedPolicy);
+        when(executionBaselineService.compare(Path.of("."), "修复任务异常", baselineFile)).thenReturn(
+                new ExecutionBaselineService.ComparisonResult(boundary, current, execution));
         when(architectureAttributor.attribute(architecture, execution)).thenReturn(attribution);
-        when(policyEngine.evaluate(policyChanges, loadedPolicy.config(), architecture)).thenReturn(policy);
-        CheckService service = new CheckService(planService, diffService, baselineService, configLoader,
-                policyEngine, architectureAttributor, new CheckEngine());
+        when(policyEngine.evaluate(policyChanges, changePolicy, architecture)).thenReturn(policy);
+        CheckService service = new CheckService(planService, diffService, executionBaselineService,
+                repositoryScanner, architectureScanner, policyEngine, architectureAttributor, new CheckEngine());
 
         VerificationReport report = service.check(new VerificationRequest(
                 Path.of("."), "修复任务异常", baselineFile));
 
         assertThat(report.baseline()).isEqualTo(VerificationReport.Baseline.EXECUTION_DELTA);
+        assertThat(report.plan()).isNull();
+        assertThat(report.executionBoundary()).isSameAs(boundary);
         assertThat(report.diffAudit()).isNull();
         assertThat(report.changeSet().executionChangeReport()).containsSame(execution);
-        verify(planService).plan(planRequest);
-        verify(baselineService).compare(root, baselineFile);
-        verify(configLoader).loadPolicy(root);
+        verify(executionBaselineService).compare(Path.of("."), "修复任务异常", baselineFile);
         verify(architectureAttributor).attribute(architecture, execution);
-        verify(policyEngine).evaluate(policyChanges, loadedPolicy.config(), architecture);
-        verifyNoInteractions(diffService);
-        verifyNoMoreInteractions(planService, baselineService, configLoader, architectureAttributor, policyEngine);
+        verify(policyEngine).evaluate(policyChanges, changePolicy, architecture);
+        verifyNoInteractions(planService, diffService, repositoryScanner, architectureScanner);
+        verifyNoMoreInteractions(executionBaselineService, architectureAttributor, policyEngine);
     }
 
     private DiffAuditReport emptyDiff(EngineeringPlan plan) {

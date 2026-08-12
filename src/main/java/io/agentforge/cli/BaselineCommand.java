@@ -1,6 +1,7 @@
 package io.agentforge.cli;
 
 import io.agentforge.application.BaselineService;
+import io.agentforge.application.ExecutionBaselineService;
 import java.nio.file.Path;
 import java.util.Locale;
 import java.util.concurrent.Callable;
@@ -15,6 +16,7 @@ import picocli.CommandLine.Spec;
 @Command(name = "baseline", description = "Capture repository state or compare it with a saved baseline.")
 public class BaselineCommand implements Callable<Integer> {
     private final BaselineService baselineService;
+    private final ExecutionBaselineService executionBaselineService;
     private final BaselineRenderer renderer;
     @Spec
     private CommandSpec spec;
@@ -35,8 +37,14 @@ public class BaselineCommand implements Callable<Integer> {
     @Option(names = "--force", description = "Overwrite an existing --output file.")
     private boolean force;
 
-    public BaselineCommand(BaselineService baselineService, BaselineRenderer renderer) {
+    @Option(names = "--task", paramLabel = "TASK",
+            description = "Capture a task-aware engineering boundary for execution verification.")
+    private String task;
+
+    public BaselineCommand(BaselineService baselineService, ExecutionBaselineService executionBaselineService,
+                           BaselineRenderer renderer) {
         this.baselineService = baselineService;
+        this.executionBaselineService = executionBaselineService;
         this.renderer = renderer;
     }
 
@@ -57,7 +65,11 @@ public class BaselineCommand implements Callable<Integer> {
     private int capture() {
         if (output == null) throw new IllegalArgumentException("baseline capture requires --output");
         if (baseline != null) throw new IllegalArgumentException("--baseline is only valid with baseline compare");
-        spec.commandLine().getOut().print(renderer.capture(baselineService.capture(path, output, force)));
+        if (task != null && task.isBlank()) throw new IllegalArgumentException("--task must not be blank");
+        String rendered = task == null
+                ? renderer.capture(baselineService.capture(path, output, force))
+                : renderer.capture(executionBaselineService.capture(path, task, output, force));
+        spec.commandLine().getOut().print(rendered);
         spec.commandLine().getOut().flush();
         return 0;
     }
@@ -66,6 +78,7 @@ public class BaselineCommand implements Callable<Integer> {
         if (baseline == null) throw new IllegalArgumentException("baseline compare requires --baseline");
         if (output != null) throw new IllegalArgumentException("--output is only valid with baseline capture");
         if (force) throw new IllegalArgumentException("--force is only valid with baseline capture");
+        if (task != null) throw new IllegalArgumentException("--task is only valid with baseline capture");
         spec.commandLine().getOut().print(renderer.compare(baselineService.compare(path, baseline)));
         spec.commandLine().getOut().flush();
         return 0;

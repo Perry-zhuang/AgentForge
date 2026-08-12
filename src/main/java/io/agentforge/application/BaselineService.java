@@ -28,7 +28,7 @@ public class BaselineService {
     }
 
     public ExecutionChangeReport compare(Path repository, Path baselineFile) {
-        RepositorySnapshot baseline = snapshotStore.read(baselineFile);
+        RepositorySnapshot baseline = snapshotStore.readRepository(baselineFile);
         RepositorySnapshot current = stateCapture.capture(repository);
         snapshotStore.requireOutsideRepository(current.repositoryRoot(), baselineFile);
         return comparator.compare(baseline, current);

@@ -20,18 +20,23 @@ public class PolicyEngine {
     }
 
     public PolicyReport evaluate(List<ChangedFile> files, PolicyConfig config, ArchitectureReport architecture) {
+        return evaluate(files, config.change(), architecture);
+    }
+
+    public PolicyReport evaluate(List<ChangedFile> files, PolicyConfig.ChangePolicy changePolicy,
+                                 ArchitectureReport architecture) {
         List<PolicyViolation> violations = new ArrayList<>();
-        if (files.size() > config.change().maxFiles()) {
+        if (files.size() > changePolicy.maxFiles()) {
             violations.add(new PolicyViolation(ViolationSeverity.ERROR, "change.max_files", "-",
-                    "Changed " + files.size() + " files; maximum is " + config.change().maxFiles()));
+                    "Changed " + files.size() + " files; maximum is " + changePolicy.maxFiles()));
         }
         Set<String> emitted = new LinkedHashSet<>();
         for (ChangedFile file : files) {
             for (String path : paths(file)) {
-                for (String pattern : config.change().deny()) {
+                for (String pattern : changePolicy.deny()) {
                     addIfMatches(violations, emitted, path, pattern, "change.deny", "Denied file changed");
                 }
-                for (String pattern : config.change().protectedPaths()) {
+                for (String pattern : changePolicy.protectedPaths()) {
                     addIfMatches(violations, emitted, path, pattern, "change.protected", "Protected file changed");
                 }
             }

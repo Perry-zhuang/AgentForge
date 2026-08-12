@@ -4,6 +4,7 @@ import java.util.List;
 
 public record VerificationReport(
         EngineeringPlan plan,
+        EngineeringBoundarySnapshot executionBoundary,
         DiffAuditReport diffAudit,
         Baseline baseline,
         VerificationStatus scopeStatus,
@@ -27,12 +28,12 @@ public record VerificationReport(
             List<VerificationFinding> findings,
             List<String> limitations
     ) {
-        this(plan, diffAudit, baseline, scopeStatus, policyStatus, taskTypeStatus, architectureStatus,
+        this(plan, null, diffAudit, baseline, scopeStatus, policyStatus, taskTypeStatus, architectureStatus,
                 overallStatus, findings, limitations, VerificationChangeSet.currentWorkingTree(diffAudit));
     }
 
     public VerificationReport {
-        if (plan == null || baseline == null || scopeStatus == null
+        if (baseline == null || scopeStatus == null
                 || policyStatus == null || taskTypeStatus == null || architectureStatus == null
                 || overallStatus == null || changeSet == null) {
             throw new IllegalArgumentException("Verification report fields are required");
@@ -43,8 +44,14 @@ public record VerificationReport(
         if (baseline == Baseline.CURRENT_WORKING_TREE && diffAudit == null) {
             throw new IllegalArgumentException("Current-working-tree report requires Diff audit facts");
         }
+        if (baseline == Baseline.CURRENT_WORKING_TREE && (plan == null || executionBoundary != null)) {
+            throw new IllegalArgumentException("Current-working-tree report requires a current EngineeringPlan only");
+        }
         if (baseline == Baseline.EXECUTION_DELTA && diffAudit != null) {
             throw new IllegalArgumentException("Execution report cannot contain whole-working-tree Diff facts");
+        }
+        if (baseline == Baseline.EXECUTION_DELTA && (executionBoundary == null || plan != null)) {
+            throw new IllegalArgumentException("Execution report requires a baseline engineering boundary only");
         }
         findings = List.copyOf(findings);
         limitations = List.copyOf(limitations);

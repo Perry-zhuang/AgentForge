@@ -1,6 +1,7 @@
 package io.agentforge.cli;
 
 import io.agentforge.model.ExecutionChangeReport;
+import io.agentforge.model.EngineeringBoundarySnapshot;
 import io.agentforge.model.PolicyViolation;
 import io.agentforge.model.VerificationFinding;
 import io.agentforge.model.VerificationReport;
@@ -84,15 +85,16 @@ public class CheckRenderer {
     private String renderExecution(VerificationReport report) {
         ExecutionChangeReport execution = report.changeSet().executionChangeReport()
                 .orElseThrow(() -> new IllegalStateException("Execution delta facts are unavailable"));
+        EngineeringBoundarySnapshot boundary = report.executionBoundary();
         StringBuilder out = new StringBuilder("AgentForge Check\n");
         section(out, "Repository");
-        row(out, "Path", report.plan().repository().repository().path());
+        row(out, "Path", report.changeSet().repository().path());
         row(out, "Branch", execution.currentBranch());
         row(out, "HEAD", shortHead(execution.currentHead()));
 
         section(out, "Task");
-        out.append(report.plan().task()).append('\n');
-        row(out, "Task Type", report.plan().taskType());
+        out.append(boundary.task()).append('\n');
+        row(out, "Task Type", boundary.taskType());
 
         section(out, "Verification");
         row(out, "Overall", report.overallStatus());
@@ -134,9 +136,9 @@ public class CheckRenderer {
         row(out, "Status", report.taskTypeStatus());
 
         section(out, "Architecture Compliance");
-        row(out, "Status", report.plan().repository().architecture().contractConfigured()
+        row(out, "Status", boundary.contractConfigured()
                 ? report.architectureStatus() : "NOT CONFIGURED");
-        row(out, "Analysis Mode", report.plan().repository().architecture().analysisMode());
+        row(out, "Analysis Mode", boundary.architectureAnalysisMode());
 
         section(out, "Findings");
         if (report.findings().isEmpty()) {

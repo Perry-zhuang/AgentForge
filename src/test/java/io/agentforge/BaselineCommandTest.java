@@ -9,6 +9,43 @@ import org.junit.jupiter.api.io.TempDir;
 
 class BaselineCommandTest {
     @Test
+    void taskAwareCapturePersistsDeterministicPreExecutionBoundaryAndStillCompares(@TempDir Path temp)
+            throws Exception {
+        Path root = repository(temp.resolve("repo"));
+        Path first = temp.resolve("first.json");
+        Path second = temp.resolve("second.json");
+        Path third = temp.resolve("third.json");
+        String task = "修复 Foo 异常";
+
+        CliTestHarness.Result firstCapture = CliTestHarness.execute("baseline", "capture", root.toString(),
+                "--task", task, "--output", first.toString());
+        assertThat(CliTestHarness.execute("baseline", "capture", root.toString(),
+                "--task", task, "--output", second.toString()).exitCode()).isZero();
+        assertThat(CliTestHarness.execute("baseline", "capture", root.toString(),
+                "--task", task, "--output", third.toString()).exitCode()).isZero();
+        CliTestHarness.Result compare = CliTestHarness.execute("baseline", "compare", root.toString(),
+                "--baseline", first.toString());
+
+        assertThat(firstCapture.exitCode()).isZero();
+        assertThat(firstCapture.output()).contains("Schema Version           2", "Engineering Boundary",
+                "Task Type                BUGFIX", "TASK-AWARE BASELINE CAPTURED");
+        assertThat(Files.readString(first)).contains(
+                "\"schemaVersion\" : 2",
+                "\"repositorySnapshot\"",
+                "\"engineeringBoundary\"",
+                "\"task\" : \"修复 Foo 异常\"",
+                "\"taskType\" : \"BUGFIX\"",
+                "\"primaryPaths\"",
+                "Foo.java",
+                "\"changePolicy\"",
+                "\"architectureContract\" : null");
+        assertThat(Files.readAllBytes(first)).isEqualTo(Files.readAllBytes(second))
+                .isEqualTo(Files.readAllBytes(third));
+        assertThat(compare.exitCode()).isZero();
+        assertThat(compare.output()).contains("Files                    0", "EXECUTION DELTA NONE");
+    }
+
+    @Test
     void capturesAndComparesDirtyRepositoryWithoutAttributingExistingChanges(@TempDir Path temp) throws Exception {
         Path root = repository(temp.resolve("repo"));
         write(root, "Foo.java", "existing dirty\n");
@@ -179,7 +216,7 @@ class BaselineCommandTest {
                 "--output", baseline.toString()).exitCode()).isZero();
         Path unsupported = temp.resolve("unsupported.json");
         Files.writeString(unsupported, Files.readString(baseline).replaceFirst(
-                "\\\"schemaVersion\\\"\\s*:\\s*1", "\"schemaVersion\" : 2"));
+                "\\\"schemaVersion\\\"\\s*:\\s*1", "\"schemaVersion\" : 99"));
 
         CliTestHarness.Result schema = CliTestHarness.execute("baseline", "compare", firstRoot.toString(),
                 "--baseline", unsupported.toString());
@@ -187,7 +224,7 @@ class BaselineCommandTest {
                 "--baseline", baseline.toString());
 
         assertThat(schema.exitCode()).isEqualTo(2);
-        assertThat(schema.output()).contains("Unsupported baseline schema version: 2");
+        assertThat(schema.output()).contains("Unsupported baseline schema version: 99");
         assertThat(mismatch.exitCode()).isEqualTo(2);
         assertThat(mismatch.output()).contains("does not match current repository");
     }

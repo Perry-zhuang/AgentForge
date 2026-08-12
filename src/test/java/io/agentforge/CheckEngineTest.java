@@ -11,10 +11,12 @@ import io.agentforge.model.DependencyEdge;
 import io.agentforge.model.DependencyGraph;
 import io.agentforge.model.DiffAuditReport;
 import io.agentforge.model.EngineeringPlan;
+import io.agentforge.model.EngineeringBoundarySnapshot;
 import io.agentforge.model.ExecutionChangeReport;
 import io.agentforge.model.JavaRole;
 import io.agentforge.model.JavaTypeInfo;
 import io.agentforge.model.PolicyReport;
+import io.agentforge.model.PolicyConfig;
 import io.agentforge.model.PolicyViolation;
 import io.agentforge.model.RepositoryInfo;
 import io.agentforge.model.RiskLevel;
@@ -174,7 +176,7 @@ class CheckEngineTest {
                 ExecutionChangeReport.ChangeType.GIT_STATE_CHANGED,
                 "src/main/java/demo/PrimaryService.java", null, false, true);
 
-        var report = engine.verify(plan, executionFacts(plan, List.of(staged)));
+        var report = engine.verify(boundary(plan), executionFacts(plan, List.of(staged)));
 
         assertThat(report.scopeStatus()).isEqualTo(VerificationStatus.PASS);
         assertThat(report.taskTypeStatus()).isEqualTo(VerificationStatus.PASS);
@@ -188,7 +190,7 @@ class CheckEngineTest {
                 ExecutionChangeReport.ChangeType.MODIFIED,
                 "src/main/java/demo/OutsideService.java", null, true, false);
 
-        var report = engine.verify(plan, executionFacts(plan, List.of(modified)));
+        var report = engine.verify(boundary(plan), executionFacts(plan, List.of(modified)));
 
         assertThat(report.findings()).extracting(VerificationFinding::code)
                 .containsExactly("OUT_OF_SCOPE_MODIFICATION", "ANALYSIS_SOURCE_MODIFICATION");
@@ -196,7 +198,7 @@ class CheckEngineTest {
     }
 
     @Test
-    void executionRenameEvaluatesOldAndNewScopePathsWithoutDuplicatingTheFileFact() {
+    void executionRenameTransfersPrimaryScopeForCompatibleDestinationWithoutDuplicatingTheFileFact() {
         EngineeringPlan plan = PromptTestFixtures.plan(TaskType.BUGFIX);
         ExecutionChangeReport.ExecutionChange rename = new ExecutionChangeReport.ExecutionChange(
                 ExecutionChangeReport.ChangeType.RENAMED,
@@ -204,12 +206,40 @@ class CheckEngineTest {
                 "src/main/java/demo/PrimaryService.java", false, true);
         VerificationChangeSet facts = executionFacts(plan, List.of(rename));
 
-        var report = engine.verify(plan, facts);
+        var report = engine.verify(boundary(plan), facts);
 
         assertThat(facts.changes()).hasSize(1);
-        assertThat(report.findings()).extracting(VerificationFinding::code, VerificationFinding::path)
-                .containsExactly(org.assertj.core.groups.Tuple.tuple(
-                        "OUT_OF_SCOPE_MODIFICATION", "src/main/java/demo/OutsideService.java"));
+        assertThat(report.findings()).isEmpty();
+        assertThat(report.scopeStatus()).isEqualTo(VerificationStatus.PASS);
+    }
+
+    @Test
+    void executionRenameUsesBaselineOldScopeAndStrictDestinationRules() {
+        EngineeringPlan plan = PromptTestFixtures.plan(TaskType.BUGFIX);
+
+        var primaryToPrimary = engine.verify(boundary(plan), executionFacts(plan, List.of(rename(
+                "src/main/java/demo/PrimaryRenamedService.java",
+                "src/main/java/demo/PrimaryService.java"))));
+        var primaryToSecondary = engine.verify(boundary(plan), executionFacts(plan, List.of(rename(
+                "src/main/java/demo/SecondaryService.java",
+                "src/main/java/demo/PrimaryService.java"))));
+        var primaryToOutside = engine.verify(boundary(plan), executionFacts(plan, List.of(rename(
+                "outside/PrimaryService.java",
+                "src/main/java/demo/PrimaryService.java"))));
+        var outsideToPrimary = engine.verify(boundary(plan), executionFacts(plan, List.of(rename(
+                "src/main/java/demo/PrimaryService.java",
+                "outside/OutsideService.java"))));
+
+        assertThat(primaryToPrimary.scopeStatus()).isEqualTo(VerificationStatus.PASS);
+        assertThat(primaryToSecondary.scopeStatus()).isEqualTo(VerificationStatus.WARNING);
+        assertThat(primaryToSecondary.findings()).extracting(VerificationFinding::code)
+                .containsExactly("SECONDARY_SCOPE_MODIFIED");
+        assertThat(primaryToOutside.scopeStatus()).isEqualTo(VerificationStatus.FAIL);
+        assertThat(primaryToOutside.findings()).extracting(VerificationFinding::code)
+                .containsExactly("OUT_OF_SCOPE_MODIFICATION");
+        assertThat(outsideToPrimary.scopeStatus()).isEqualTo(VerificationStatus.FAIL);
+        assertThat(outsideToPrimary.findings()).extracting(VerificationFinding::code)
+                .containsExactly("OUT_OF_SCOPE_MODIFICATION");
     }
 
     @Test
@@ -223,7 +253,7 @@ class CheckEngineTest {
                 new ExecutionChangeReport.ExecutionChange(ExecutionChangeReport.ChangeType.GIT_STATE_CHANGED,
                         "src/main/java/demo/TaskRequest.java", null, false, true));
 
-        var report = engine.verify(plan, executionFacts(plan, changes));
+        var report = engine.verify(boundary(plan), executionFacts(plan, changes));
 
         assertThat(report.findings()).extracting(VerificationFinding::code, VerificationFinding::path)
                 .containsExactly(
@@ -270,5 +300,19 @@ class CheckEngineTest {
                 repository.branch(), repository.branch(), false, repository.head(), repository.head(), false, changes);
         return VerificationChangeSet.executionDelta(repository, execution, new PolicyReport(List.of()),
                 plan.repository().architecture(), plan.defaultPolicyUsed(), List.of());
+    }
+
+    private EngineeringBoundarySnapshot boundary(EngineeringPlan plan) {
+        return new EngineeringBoundarySnapshot(plan.task(), plan.taskType(),
+                plan.scope().primary().stream().map(file -> file.path()).toList(),
+                plan.scope().secondary().stream().map(file -> file.path()).toList(),
+                plan.scope().reference().stream().map(file -> file.path()).toList(),
+                new PolicyConfig.ChangePolicy(20, List.of(), List.of()), plan.defaultPolicyUsed(),
+                plan.repository().architecture().analysisMode(), null);
+    }
+
+    private ExecutionChangeReport.ExecutionChange rename(String newPath, String oldPath) {
+        return new ExecutionChangeReport.ExecutionChange(ExecutionChangeReport.ChangeType.RENAMED,
+                newPath, oldPath, false, true);
     }
 }
