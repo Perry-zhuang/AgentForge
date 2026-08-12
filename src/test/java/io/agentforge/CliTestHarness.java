@@ -1,6 +1,7 @@
 package io.agentforge;
 
 import io.agentforge.application.AuditService;
+import io.agentforge.application.CheckService;
 import io.agentforge.application.DiffAuditService;
 import io.agentforge.application.InitService;
 import io.agentforge.application.InspectService;
@@ -8,6 +9,8 @@ import io.agentforge.application.PlanService;
 import io.agentforge.application.PromptService;
 import io.agentforge.cli.AgentForgeCommand;
 import io.agentforge.cli.AuditCommand;
+import io.agentforge.cli.CheckCommand;
+import io.agentforge.cli.CheckRenderer;
 import io.agentforge.cli.DiffCommand;
 import io.agentforge.cli.InitCommand;
 import io.agentforge.cli.InspectCommand;
@@ -34,6 +37,7 @@ import io.agentforge.recommendation.RecommendationEngine;
 import io.agentforge.scanner.ArchitectureScanner;
 import io.agentforge.scanner.ContextScanner;
 import io.agentforge.scanner.RepositoryScanner;
+import io.agentforge.verification.CheckEngine;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Map;
@@ -61,8 +65,10 @@ final class CliTestHarness {
         PlanService planService = new PlanService(inspectService, configLoader, changeScanner,
                 new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor()));
         PromptService promptService = new PromptService(planService, new PromptEngine());
+        CheckService checkService = new CheckService(planService, diffService, new CheckEngine());
         TextReportRenderer renderer = new TextReportRenderer();
         PromptRenderer promptRenderer = new PromptRenderer();
+        CheckRenderer checkRenderer = new CheckRenderer();
 
         AuditCommand audit = new AuditCommand(auditService, renderer);
         InitCommand init = new InitCommand(initService, renderer);
@@ -70,13 +76,15 @@ final class CliTestHarness {
         InspectCommand inspect = new InspectCommand(inspectService, renderer);
         PlanCommand plan = new PlanCommand(planService, renderer);
         PromptCommand prompt = new PromptCommand(promptService, promptRenderer);
+        CheckCommand check = new CheckCommand(checkService, checkRenderer);
         Map<Class<?>, Object> components = Map.of(
                 AuditCommand.class, audit,
                 InitCommand.class, init,
                 DiffCommand.class, diff,
                 InspectCommand.class, inspect,
                 PlanCommand.class, plan,
-                PromptCommand.class, prompt);
+                PromptCommand.class, prompt,
+                CheckCommand.class, check);
         CommandLine.IFactory factory = new CommandLine.IFactory() {
             @Override
             public <K> K create(Class<K> type) {

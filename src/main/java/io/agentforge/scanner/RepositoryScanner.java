@@ -109,10 +109,7 @@ public class RepositoryScanner {
     }
 
     private boolean isSource(FileType type) {
-        return switch (type) {
-            case JAVA, KOTLIN, JAVASCRIPT, JSX, TYPESCRIPT, TSX, VUE -> true;
-            default -> false;
-        };
+        return type.source();
     }
 
     private boolean isTestPath(String path) {
@@ -122,19 +119,7 @@ public class RepositoryScanner {
     }
 
     public static FileType classify(String name) {
-        String lower = name.toLowerCase(Locale.ROOT);
-        if (lower.endsWith(".java")) return FileType.JAVA;
-        if (lower.endsWith(".kt") || lower.endsWith(".kts")) return FileType.KOTLIN;
-        if (lower.endsWith(".jsx")) return FileType.JSX;
-        if (lower.endsWith(".js") || lower.endsWith(".mjs") || lower.endsWith(".cjs")) return FileType.JAVASCRIPT;
-        if (lower.endsWith(".tsx")) return FileType.TSX;
-        if (lower.endsWith(".ts") || lower.endsWith(".mts") || lower.endsWith(".cts")) return FileType.TYPESCRIPT;
-        if (lower.endsWith(".vue")) return FileType.VUE;
-        if (lower.endsWith(".sql")) return FileType.SQL;
-        if (lower.endsWith(".yaml") || lower.endsWith(".yml")) return FileType.YAML;
-        if (lower.endsWith(".md") || lower.endsWith(".markdown")) return FileType.MARKDOWN;
-        if (lower.endsWith(".sh") || lower.endsWith(".bash") || lower.endsWith(".zsh")) return FileType.SHELL;
-        return FileType.OTHER;
+        return FileType.classify(name);
     }
 
     public record Result(

@@ -11,6 +11,7 @@ import io.agentforge.model.FrontendFramework;
 import io.agentforge.scanner.RepositoryScanner;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -61,6 +62,54 @@ class RepositoryScannerTest {
         assertThat(scanner.scan(root).repository())
                 .extracting(repository -> repository.branch(), repository -> repository.head().length())
                 .containsExactly("DETACHED", 40);
+    }
+
+    @Test
+    void sharedFileTypeExtractionPreservesEveryExistingClassification() {
+        assertThat(Map.ofEntries(
+                Map.entry("App.java", RepositoryScanner.classify("App.java")),
+                Map.entry("App.kt", RepositoryScanner.classify("App.kt")),
+                Map.entry("build.kts", RepositoryScanner.classify("build.kts")),
+                Map.entry("app.js", RepositoryScanner.classify("app.js")),
+                Map.entry("app.mjs", RepositoryScanner.classify("app.mjs")),
+                Map.entry("app.cjs", RepositoryScanner.classify("app.cjs")),
+                Map.entry("app.jsx", RepositoryScanner.classify("app.jsx")),
+                Map.entry("app.ts", RepositoryScanner.classify("app.ts")),
+                Map.entry("app.mts", RepositoryScanner.classify("app.mts")),
+                Map.entry("app.cts", RepositoryScanner.classify("app.cts")),
+                Map.entry("app.tsx", RepositoryScanner.classify("app.tsx")),
+                Map.entry("App.vue", RepositoryScanner.classify("App.vue")),
+                Map.entry("schema.sql", RepositoryScanner.classify("schema.sql")),
+                Map.entry("app.yml", RepositoryScanner.classify("app.yml")),
+                Map.entry("app.yaml", RepositoryScanner.classify("app.yaml")),
+                Map.entry("README.md", RepositoryScanner.classify("README.md")),
+                Map.entry("README.markdown", RepositoryScanner.classify("README.markdown")),
+                Map.entry("run.sh", RepositoryScanner.classify("run.sh")),
+                Map.entry("run.bash", RepositoryScanner.classify("run.bash")),
+                Map.entry("run.zsh", RepositoryScanner.classify("run.zsh")),
+                Map.entry("notes.txt", RepositoryScanner.classify("notes.txt"))))
+                .containsExactlyInAnyOrderEntriesOf(Map.ofEntries(
+                        Map.entry("App.java", FileType.JAVA),
+                        Map.entry("App.kt", FileType.KOTLIN),
+                        Map.entry("build.kts", FileType.KOTLIN),
+                        Map.entry("app.js", FileType.JAVASCRIPT),
+                        Map.entry("app.mjs", FileType.JAVASCRIPT),
+                        Map.entry("app.cjs", FileType.JAVASCRIPT),
+                        Map.entry("app.jsx", FileType.JSX),
+                        Map.entry("app.ts", FileType.TYPESCRIPT),
+                        Map.entry("app.mts", FileType.TYPESCRIPT),
+                        Map.entry("app.cts", FileType.TYPESCRIPT),
+                        Map.entry("app.tsx", FileType.TSX),
+                        Map.entry("App.vue", FileType.VUE),
+                        Map.entry("schema.sql", FileType.SQL),
+                        Map.entry("app.yml", FileType.YAML),
+                        Map.entry("app.yaml", FileType.YAML),
+                        Map.entry("README.md", FileType.MARKDOWN),
+                        Map.entry("README.markdown", FileType.MARKDOWN),
+                        Map.entry("run.sh", FileType.SHELL),
+                        Map.entry("run.bash", FileType.SHELL),
+                        Map.entry("run.zsh", FileType.SHELL),
+                        Map.entry("notes.txt", FileType.OTHER)));
     }
 
     private static void write(Path root, String relative, String content) throws Exception {

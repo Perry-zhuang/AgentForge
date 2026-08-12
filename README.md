@@ -4,11 +4,12 @@ AgentForge is a local AI Engineering control plane and repository governance CLI
 
 AgentForge does not write code. It analyzes the repository, a development task, and the current change before or after a Coding Agent works on it.
 
-V0.2 P3 adds deterministic coding-agent prompt delivery on top of engineering planning:
+V0.2 P4 P0 adds deterministic engineering-boundary verification on top of prompt delivery:
 
 - Task Inspection
 - Engineering Plan
 - Engineering Prompt
+- Engineering Boundary Check
 - Repository Audit
 - Architecture Contract
 - Change Policy
@@ -29,6 +30,7 @@ java -jar target/agentforge.jar diff /path/to/project
 java -Xss16m -jar target/agentforge.jar inspect /path/to/project "development task"
 java -Xss16m -jar target/agentforge.jar plan /path/to/project "development task"
 java -Xss16m -jar target/agentforge.jar prompt /path/to/project "development task"
+java -Xss16m -jar target/agentforge.jar check /path/to/project "development task"
 ```
 
 ## Commands
@@ -81,6 +83,19 @@ The prompt keeps PRIMARY, SECONDARY, and REFERENCE semantics explicit, preserves
 
 By default the prompt is written to standard output. `--output FILE` writes UTF-8 to an existing parent directory and refuses to overwrite an existing file. `--output FILE --force` permits replacement. A relative output path is resolved from the current working directory. Writing inside the analyzed repository emits a warning; only the explicitly selected output file is written.
 
+### `agentforge check`
+
+Verifies the current Git working-tree changes against the deterministic Engineering Boundary computed for a task:
+
+```bash
+java -Xss16m -jar target/agentforge.jar check "fix login 401"
+java -Xss16m -jar target/agentforge.jar check /path/to/project "fix backup alert synchronization"
+```
+
+Check calls planning once, consumes the existing Diff facts, and does not rescan source or infer new architecture facts in `CheckEngine`. PRIMARY changes are allowed, SECONDARY changes require review, and REFERENCE or out-of-scope changes fail. For ANALYSIS tasks, recognized source-code changes fail independently of scope findings. Individual policy violations are preserved from the existing Policy result.
+
+The P4 P0 baseline is `CURRENT_WORKING_TREE`. A dirty repository is supported, but Check cannot yet distinguish pre-existing dirty changes from changes introduced by a specific Coding Agent execution. PASS and WARNING return exit code 0, FAIL returns 1, and command/configuration errors return 2.
+
 ### `agentforge audit`
 
 Scans repository technology, structure, AI context, architecture, and readiness, then reports the highest-value actions for improving Coding Agent readiness.
@@ -121,13 +136,15 @@ It does not guarantee detection of generic-wrapped dependencies, reflection, run
 
 `agentforge diff` audits the working tree against the current repository state. It includes staged, unstaged, untracked, deleted, and renamed files.
 
+`agentforge check` evaluates the same current working tree against a task-specific Engineering Boundary. It does not yet provide snapshot, commit, or execution-session attribution.
+
 ### Architecture Diff
 
 V0.1.1 reports architecture findings present in changed source files. It does not compare complete HEAD and working-tree dependency graphs, so it does not claim that a finding was introduced by the exact current diff.
 
 ### AI
 
-V0.2 P3 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, and prompt generation are deterministic, rule-based, and explainable. The prompt command packages existing engineering facts; it does not introduce a new source-analysis or inference layer.
+V0.2 P4 P0 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, prompt generation, and boundary verification are deterministic, rule-based, and explainable. Prompt packages existing engineering facts, while Check compares existing Plan and Diff facts without becoming a code-review or source-analysis layer.
 
 ### Task Inspection
 

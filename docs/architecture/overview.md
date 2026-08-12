@@ -110,3 +110,34 @@ plan    = Organize known facts into a safe implementation plan
 prompt  = Package the engineering plan as deterministic Coding Agent instructions
 diff    = Evaluate current working-tree changes
 ```
+
+## V0.2 P4 P0 Engineering Boundary Check Flow
+
+```text
+CheckCommand
+    -> CheckService
+        -> PlanService.plan(...) exactly once
+            -> EngineeringPlan
+        -> DiffAuditService.audit(...) exactly once
+            -> DiffAuditReport
+        -> CheckEngine
+            -> VerificationReport
+    -> CheckRenderer
+```
+
+`CheckEngine` is a pure boundary-comparison component. It does not scan the repository, inspect source contents, load configuration, classify the task, calculate plan scope, evaluate policy rules, or infer architecture. It compares the plan's ordered PRIMARY, SECONDARY, and REFERENCE scope with the existing Git/Diff facts. Rename old and new paths are evaluated independently, and findings from scope, policy, task type, and architecture remain independent.
+
+Policy findings preserve each `PolicyEngine` violation from `DiffAuditReport`. Architecture compliance consumes only the changed-file architecture facts already produced by `DiffAuditService`; when no architecture contract is configured, Check reports `NOT CONFIGURED` without promoting lightweight observations to violations. ANALYSIS source checks reuse the same file-type classification used by `RepositoryScanner` and do not inspect file contents.
+
+P4 P0 uses `CURRENT_WORKING_TREE` as its verification baseline. It supports dirty repositories but cannot distinguish pre-existing changes from changes introduced by a particular Coding Agent execution. This attribution boundary is intentionally deferred; Check does not add an adapter, execution session, daemon, or `agentforge run` command.
+
+The command boundaries are:
+
+```text
+audit   = Understand repository readiness
+inspect = Locate known relevant files
+plan    = Organize known facts into a safe implementation plan
+prompt  = Package the engineering plan as deterministic Coding Agent instructions
+diff    = Evaluate current working-tree changes and policy risk
+check   = Verify current working-tree changes against a task-specific Engineering Boundary
+```
