@@ -40,7 +40,9 @@ java -Xss16m -jar target/agentforge.jar inspect --limit 15 /path/to/project "bac
 
 When `PATH` is omitted, the current directory is inspected. The default limit is 10 and the valid range is 1–15. Results include explainable scores, build modules, source areas, and detected one-hop dependency flow.
 
-Inspection ranks recognized Java, Kotlin, JavaScript, JSX, TypeScript, TSX, and Vue sources. Task analysis separates core keywords, exact phrases, and weak derived n-grams. Core-token coverage and exact phrase evidence dominate ranking; architecture roles are contextual evidence only. Java also uses class/file/package matches, imports, direct field or constructor dependencies, and one-hop neighbors of strong relevance seeds.
+Inspection ranks recognized Java, Kotlin, JavaScript, JSX, TypeScript, TSX, and Vue sources. Task analysis separates core keywords, exact phrases, and weak derived n-grams. Ranking is intentionally limited to four explainable dimensions: structural identity, semantic task evidence, one-hop dependency evidence, and lightweight file responsibility. Architecture roles are contextual evidence only. Java also uses class/file/package matches, imports, and direct field or constructor dependencies.
+
+Each result separates three concepts: `Score` summarizes the amount of evidence, ranking identifies which files should be inspected first, and `Confidence` expresses how strongly the structural and task evidence support relevance. Confidence is not a ranking key, so calibration does not reorder results. The CLI shows core-keyword coverage and a short confidence reason, groups positive evidence by task, structure, dependency, and context, and hides internal weak n-grams.
 
 ### `agentforge audit`
 
@@ -94,7 +96,9 @@ V0.2 P1 has no LLM calls, Agent execution, or Codex integration. Its findings ar
 
 V0.2 P1 inspection is lexical and structural, not semantic search. It does not translate between languages, infer synonyms, build method call graphs, or understand runtime behavior. Chinese input uses deterministic, dictionary-free core-token splitting plus weak derived n-grams. Core-token coverage is computed within one logical source line, with a bounded window for long lines, so unrelated declarations cannot be combined into artificial full coverage.
 
-Dependency expansion is Java-only, field/constructor based, limited to one hop, and starts only from exact, multi-core, full-coverage, or strong class/file/package seeds. Package concentration is a ranking hint rather than proof that every result belongs to the requested workflow. Large Java repositories affected by the current lightweight-regex stack limitation may still require `-Xss16m`.
+`HIGH`, `MEDIUM`, and `LOW` are calibrated confidence labels rather than score bands. A high lexical score without structural task evidence does not imply `HIGH`, and an architecture role alone cannot promote a file. Confidence remains heuristic and should be read together with the reported match coverage and evidence.
+
+Dependency expansion is Java-only, field/constructor based, and limited to one hop. Propagation starts only from structural task matches; source-text exact phrases or multi-core matches alone do not create seeds. DTO, request, response, model, enum, and config files without structural task identity are capped at LOW relevance. Package concentration only reranks candidates that are already relevant. Large Java repositories affected by the current lightweight-regex stack limitation may still require `-Xss16m`.
 
 ## Roadmap
 

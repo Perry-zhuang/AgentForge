@@ -1,8 +1,10 @@
 package io.agentforge.inspection;
 
 import io.agentforge.model.ContextReport;
+import io.agentforge.model.ConfidenceProfile;
 import io.agentforge.model.DependencyEdge;
 import io.agentforge.model.DependencyGraph;
+import io.agentforge.model.FileResponsibility;
 import io.agentforge.model.FileType;
 import io.agentforge.model.JavaRole;
 import io.agentforge.model.MatchEvidence;
@@ -45,13 +47,12 @@ final class CoreRelevantFileEvaluator {
         Map<String, Candidate> candidates = new LinkedHashMap<>();
         for (SourceFileIndex source : sources.values()) {
             Candidate candidate = new Candidate(source, moduleFor(source.path(), structure.modules()),
-                    task.coreTokens().size());
+                    task.coreTokens());
             lexicalEvidence(candidate, task);
             contextEvidence(candidate, contextDocuments);
             candidate.addRoleEvidence();
             candidates.put(source.path(), candidate);
         }
-        applySourceAreaCohortEvidence(candidates.values());
 
         Map<String, String> qualifiedToPath = javaIndex.stream()
                 .filter(source -> !source.qualifiedName().isBlank())
@@ -60,17 +61,19 @@ final class CoreRelevantFileEvaluator {
         Set<String> strongSeedPaths = candidates.values().stream().filter(Candidate::strongSeed)
                 .map(candidate -> candidate.source.path())
                 .collect(Collectors.toCollection(LinkedHashSet::new));
+        applySourceAreaCohortEvidence(candidates.values());
         applyOneHopEvidence(candidates, graph, qualifiedToPath, strongSeedPaths);
 
         List<RelevantFile> relevantFiles = candidates.values().stream()
                 .filter(Candidate::eligibleForResult)
-                .filter(candidate -> candidate.score() >= MINIMUM_SCORE)
-                .sorted(Comparator.comparingInt(Candidate::score).reversed()
+                .filter(Candidate::meetsMinimum)
+                .sorted(Comparator.comparingInt(Candidate::rankingTier).reversed()
+                        .thenComparing(Comparator.comparingInt(Candidate::structuralScore).reversed())
                         .thenComparing(Comparator.comparingDouble(Candidate::coreCoverage).reversed())
                         .thenComparing(Comparator.comparingInt(Candidate::semanticSpecificity).reversed())
-                        .thenComparing(Comparator.comparingInt(Candidate::structuralEvidenceCount).reversed())
                         .thenComparing(Comparator.comparingInt(Candidate::directScore).reversed())
-                        .thenComparingInt(Candidate::passivePriority)
+                        .thenComparingInt(Candidate::responsibilityPriority)
+                        .thenComparing(Comparator.comparingInt(Candidate::dependencyScore).reversed())
                         .thenComparingInt(Candidate::rolePriority)
                         .thenComparing(candidate -> candidate.source.path()))
                 .limit(limit).map(Candidate::toRelevantFile).toList();
@@ -100,17 +103,38 @@ final class CoreRelevantFileEvaluator {
         List<String> structuralTerms = structuralTerms(task);
         String className = source.javaSource() ? source.className() : "";
         List<String> identityMatches = matchedTerms(className + " " + fileStem(source.path()), structuralTerms);
-        if (!identityMatches.isEmpty()) candidate.add("CLASS_OR_FILE", 30,
-                "Class or file name matched core/exact task term: " + String.join(", ", identityMatches));
+        if (!identityMatches.isEmpty()) {
+            candidate.add("CLASS_OR_FILE", 30,
+                    "Class or file name matched core/exact task term: " + String.join(", ", identityMatches));
+            candidate.markStrongStructuralMatch(strongStructuralMatch(identityMatches, task));
+        }
         String location = source.javaSource() ? source.packageName() : parent(source.path());
         List<String> locationMatches = matchedTerms(location, structuralTerms);
-        if (!locationMatches.isEmpty()) candidate.add("SOURCE_AREA", 15,
-                "Package or source directory matched core/exact task term: " + String.join(", ", locationMatches));
-        List<String> imports = source.imports().stream()
-                .filter(value -> !matchedTerms(value, structuralTerms).isEmpty()).sorted().toList();
-        if (!imports.isEmpty()) candidate.add("IMPORT", 10, "Imported type matched: " + imports.get(0));
+        if (!locationMatches.isEmpty()) {
+            candidate.add("SOURCE_AREA", 15,
+                    "Package or source directory matched core/exact task term: " + String.join(", ", locationMatches));
+            candidate.markStrongStructuralMatch(strongStructuralMatch(locationMatches, task));
+        }
+        String matchedImport = source.imports().stream()
+                .filter(value -> !matchedTerms(value, structuralTerms).isEmpty()).sorted().findFirst().orElse(null);
+        if (matchedImport != null) {
+            List<String> matches = matchedTerms(matchedImport, structuralTerms);
+            candidate.add("IMPORT", 10, "Imported type matched: " + matchedImport);
+            candidate.markStrongStructuralMatch(strongStructuralMatch(matches, task));
+        }
+        String matchedDependencyType = source.dependencyTypes().stream()
+                .filter(value -> !matchedTerms(value, structuralTerms).isEmpty()).sorted().findFirst().orElse(null);
+        if (matchedDependencyType != null) {
+            List<String> matches = matchedTerms(matchedDependencyType, structuralTerms);
+            candidate.add("DIRECT_DEPENDENCY_TYPE", 8,
+                    "Field or constructor dependency type matched task: " + matchedDependencyType);
+            candidate.markStrongStructuralMatch(strongStructuralMatch(matches, task));
+        }
 
         WindowMatch match = bestWindow(source.content(), task);
+        candidate.matchedCoreTokens = match.coreTokens();
+        candidate.missingCoreTokens = task.coreTokens().stream()
+                .filter(token -> !match.coreTokens().contains(token)).toList();
         candidate.matchedCoreCount = match.coreTokens().size();
         match.coreTokens().forEach(core -> candidate.add("CORE_TOKEN", 5, "Core token matched: " + core));
         if (match.coreTokens().size() >= 2) candidate.add("MULTI_CORE", 10,
@@ -118,9 +142,6 @@ final class CoreRelevantFileEvaluator {
         if (task.coreTokens().size() >= 2 && match.coreTokens().size() == task.coreTokens().size()) {
             candidate.add("FULL_CORE_COVERAGE", 10,
                     "Full core token coverage: " + match.coreTokens().size() + "/" + task.coreTokens().size());
-        } else if (!match.coreTokens().isEmpty() && task.coreTokens().size() >= 2) {
-            List<String> missing = task.coreTokens().stream().filter(token -> !match.coreTokens().contains(token)).toList();
-            candidate.add("MISSING_CORE", 0, "Missing core tokens: " + String.join(", ", missing));
         }
         if (!match.exactPhrases().isEmpty()) candidate.add("EXACT_PHRASE", 15,
                 "Exact task phrase matched: " + String.join(", ", match.exactPhrases()));
@@ -178,7 +199,7 @@ final class CoreRelevantFileEvaluator {
 
     private void applySourceAreaCohortEvidence(java.util.Collection<Candidate> candidates) {
         Map<String, List<Candidate>> areas = candidates.stream()
-                .filter(candidate -> candidate.strongSeed() && candidate.cohortEligible())
+                .filter(candidate -> candidate.cohortEligible() && candidate.directScore() >= 25)
                 .collect(Collectors.groupingBy(Candidate::businessArea, LinkedHashMap::new, Collectors.toList()));
         int largestArea = areas.values().stream().mapToInt(List::size).max().orElse(0);
         for (Map.Entry<String, List<Candidate>> entry : areas.entrySet()) {
@@ -197,12 +218,12 @@ final class CoreRelevantFileEvaluator {
             if (fromPath == null || toPath == null || fromPath.equals(toPath)) continue;
             if (strongSeedPaths.contains(toPath)) {
                 Candidate dependent = candidates.get(fromPath);
-                if (dependent != null) dependent.addOnce("DEPENDENCY", 10,
-                        "Field or constructor dependency on strong relevant type: " + simpleName(edge.to()));
+                if (dependent != null) dependent.addOnce("DEPENDENCY", 7,
+                        "Direct dependency on strong relevant type: " + simpleName(edge.to()));
             }
             if (strongSeedPaths.contains(fromPath)) {
                 Candidate dependency = candidates.get(toPath);
-                if (dependency != null && !dependency.has("DEPENDENCY")) dependency.addOnce("ARCHITECTURE_NEIGHBOR", 5,
+                if (dependency != null && !dependency.has("DEPENDENCY")) dependency.addOnce("ARCHITECTURE_NEIGHBOR", 4,
                         "One-hop dependency neighbor of strong relevant type: " + simpleName(edge.from()));
             }
         }
@@ -268,6 +289,42 @@ final class CoreRelevantFileEvaluator {
         return List.copyOf(terms);
     }
 
+    private static FileResponsibility classifyResponsibility(SourceFileIndex source) {
+        String name = normalizeCompact(source.className().isBlank() ? fileStem(source.path()) : source.className());
+        String location = normalizeText(source.javaSource() ? source.packageName() : parent(source.path()));
+        String content = normalizeText(source.content());
+        if (name.endsWith("enum") || content.startsWith("enum ") || content.contains(" enum ")) {
+            return FileResponsibility.ENUM;
+        }
+        if (name.endsWith("configuration") || name.endsWith("config") || content.contains("@configuration")) {
+            return FileResponsibility.CONFIG;
+        }
+        if (name.endsWith("request")) return FileResponsibility.REQUEST;
+        if (name.endsWith("response")) return FileResponsibility.RESPONSE;
+        if (name.endsWith("dto")) return FileResponsibility.DTO;
+        if (endsWithAny(name, "bean", "entity", "model", "vo")) return FileResponsibility.MODEL;
+        if (source.role() == JavaRole.CONTROLLER || name.endsWith("controller")) {
+            return FileResponsibility.CONTROLLER;
+        }
+        if (source.role() == JavaRole.SERVICE || endsWithAny(name, "service", "serviceimpl")) {
+            return FileResponsibility.SERVICE;
+        }
+        if (endsWithAny(name, "manager", "managerimpl", "handler", "handlerimpl", "processor",
+                "processorimpl", "job", "jobimpl", "task", "taskimpl", "listener", "usecase")) {
+            return FileResponsibility.BUSINESS;
+        }
+        if (source.role() == JavaRole.COMPONENT) return FileResponsibility.COMPONENT;
+        if (endsWithAny(name, "util", "utils") || location.matches(".*(?:^|[./])(util|utils)(?:[./]|$).*")) {
+            return FileResponsibility.UTIL;
+        }
+        return FileResponsibility.OTHER;
+    }
+
+    private static boolean endsWithAny(String value, String... suffixes) {
+        for (String suffix : suffixes) if (value.endsWith(suffix)) return true;
+        return false;
+    }
+
     private static List<String> matchedTerms(String value, List<String> terms) {
         if (value == null || value.isBlank()) return List.of();
         String normalized = normalizeCompact(value);
@@ -275,6 +332,13 @@ final class CoreRelevantFileEvaluator {
             String normalizedTerm = normalizeCompact(term);
             return normalizedTerm.length() >= 2 && normalized.contains(normalizedTerm);
         }).distinct().limit(4).toList();
+    }
+
+    private static boolean strongStructuralMatch(List<String> matches, TaskAnalysis task) {
+        if (matches.isEmpty()) return false;
+        if (task.coreTokens().size() <= 1) return true;
+        if (task.exactPhrases().stream().anyMatch(matches::contains)) return true;
+        return matches.stream().filter(task.coreTokens()::contains).distinct().count() >= 2;
     }
 
     private static String moduleFor(String path, List<String> modules) {
@@ -316,18 +380,24 @@ final class CoreRelevantFileEvaluator {
         private final SourceFileIndex source;
         private final String module;
         private final int totalCoreTokens;
+        private final FileResponsibility responsibility;
         private final List<MatchEvidence> evidence = new ArrayList<>();
+        private List<String> matchedCoreTokens = List.of();
+        private List<String> missingCoreTokens = List.of();
         private int matchedCoreCount;
+        private boolean strongStructuralMatch;
 
-        private Candidate(SourceFileIndex source, String module, int totalCoreTokens) {
+        private Candidate(SourceFileIndex source, String module, List<String> coreTokens) {
             this.source = source;
             this.module = module;
-            this.totalCoreTokens = totalCoreTokens;
+            this.totalCoreTokens = coreTokens.size();
+            this.responsibility = classifyResponsibility(source);
         }
 
         private void add(String signal, int points, String detail) { evidence.add(new MatchEvidence(signal, points, detail)); }
         private void addOnce(String signal, int points, String detail) { if (!has(signal)) add(signal, points, detail); }
         private boolean has(String signal) { return evidence.stream().anyMatch(item -> item.signal().equals(signal)); }
+        private void markStrongStructuralMatch(boolean strong) { strongStructuralMatch |= strong; }
 
         private void addRoleEvidence() {
             if (!hasTaskEvidence() || !source.javaSource() || source.role() == JavaRole.OTHER) return;
@@ -336,22 +406,22 @@ final class CoreRelevantFileEvaluator {
                 case REPOSITORY, MAPPER -> 1;
                 case COMPONENT, OTHER -> 0;
             };
-            add("JAVA_ROLE", points, "Architecture role: " + source.role());
+            if (points > 0) add("JAVA_ROLE", points, "Architecture role: " + source.role());
         }
 
         private boolean hasTaskEvidence() {
             return evidence.stream().anyMatch(item -> Set.of("CORE_TOKEN", "EXACT_PHRASE", "DERIVED_NGRAM",
-                    "CLASS_OR_FILE", "SOURCE_AREA", "IMPORT").contains(item.signal()));
+                    "CLASS_OR_FILE", "SOURCE_AREA", "IMPORT", "DIRECT_DEPENDENCY_TYPE").contains(item.signal()));
         }
 
         private boolean strongSeed() {
-            return has("EXACT_PHRASE") || has("MULTI_CORE") || has("FULL_CORE_COVERAGE")
-                    || has("CLASS_OR_FILE") || has("SOURCE_AREA");
+            return strongStructuralMatch || has("FULL_CORE_COVERAGE") && hasStructuralTaskMatch();
         }
 
         private boolean eligibleForResult() {
             return matchedCoreCount > 0 || has("EXACT_PHRASE") || has("CLASS_OR_FILE") || has("SOURCE_AREA")
-                    || has("IMPORT") || has("DEPENDENCY") || has("ARCHITECTURE_NEIGHBOR");
+                    || has("IMPORT") || has("DIRECT_DEPENDENCY_TYPE") || has("DEPENDENCY")
+                    || has("ARCHITECTURE_NEIGHBOR");
         }
 
         private String businessArea() {
@@ -366,14 +436,12 @@ final class CoreRelevantFileEvaluator {
         }
 
         private boolean cohortEligible() {
-            String area = source.javaSource() ? source.packageName() : parent(source.path()).replace('/', '.');
-            String[] parts = area.split("\\.");
-            String leaf = parts.length == 0 ? "" : parts[parts.length - 1].toLowerCase(Locale.ROOT);
-            return !Set.of("dto", "vo", "entity", "model", "enum", "enums", "constant", "constants",
-                    "util", "utils", "config", "configuration").contains(leaf);
+            return !responsibility.passive() && responsibility != FileResponsibility.UTIL;
         }
 
-        private int score() { return Math.min(100, evidence.stream().mapToInt(MatchEvidence::points).sum()); }
+        private int rawScore() { return Math.min(100, evidence.stream().mapToInt(MatchEvidence::points).sum()); }
+        private int score() { return capped() ? Math.min(24, rawScore()) : rawScore(); }
+        private boolean meetsMinimum() { return score() >= MINIMUM_SCORE || dependencyScore() >= 7; }
         private double coreCoverage() { return totalCoreTokens == 0 ? 0 : (double) matchedCoreCount / totalCoreTokens; }
         private int semanticSpecificity() {
             if (has("EXACT_PHRASE")) return 4;
@@ -382,15 +450,49 @@ final class CoreRelevantFileEvaluator {
             return matchedCoreCount > 0 ? 1 : 0;
         }
         private int directScore() {
-            return evidence.stream().filter(item -> !item.signal().equals("DEPENDENCY")
-                            && !item.signal().equals("ARCHITECTURE_NEIGHBOR"))
+            return evidence.stream().filter(item -> !Set.of("DEPENDENCY", "ARCHITECTURE_NEIGHBOR",
+                            "SOURCE_AREA_COHORT", "JAVA_ROLE",
+                            "DERIVED_NGRAM")
+                            .contains(item.signal()))
                     .mapToInt(MatchEvidence::points).sum();
         }
-        private int structuralEvidenceCount() {
-            return (int) evidence.stream().filter(item -> Set.of("CLASS_OR_FILE", "SOURCE_AREA", "IMPORT",
-                    "DEPENDENCY", "ARCHITECTURE_NEIGHBOR").contains(item.signal())).count();
+        private int structuralScore() {
+            return evidence.stream().filter(item -> Set.of("CLASS_OR_FILE", "SOURCE_AREA", "IMPORT",
+                            "DIRECT_DEPENDENCY_TYPE").contains(item.signal()))
+                    .mapToInt(MatchEvidence::points).sum();
         }
-        private int passivePriority() { return cohortEligible() ? 0 : 1; }
+        private int dependencyScore() {
+            return evidence.stream().filter(item -> Set.of("DEPENDENCY", "ARCHITECTURE_NEIGHBOR")
+                            .contains(item.signal()))
+                    .mapToInt(MatchEvidence::points).sum();
+        }
+        private boolean hasStructuralTaskMatch() {
+            return has("CLASS_OR_FILE") || has("SOURCE_AREA") || has("IMPORT") || has("DIRECT_DEPENDENCY_TYPE");
+        }
+        private boolean capExempt() { return hasStructuralTaskMatch() || has("DEPENDENCY"); }
+        private boolean capped() { return responsibility.passive() && !capExempt(); }
+        private int rankingTier() {
+            if (hasStructuralTaskMatch()) return 3;
+            if (hasTaskEvidence() && !responsibility.passive()) return 2;
+            if (hasTaskEvidence() && responsibility.taskData()) return 1;
+            return 0;
+        }
+        private int responsibilityPriority() {
+            return switch (responsibility) {
+                case SERVICE -> 0;
+                case BUSINESS -> 1;
+                case CONTROLLER -> 2;
+                case COMPONENT -> 3;
+                case OTHER -> 4;
+                case UTIL -> 5;
+                case MODEL -> 6;
+                case DTO -> 7;
+                case REQUEST -> 8;
+                case RESPONSE -> 9;
+                case ENUM -> 10;
+                case CONFIG -> 11;
+            };
+        }
         private int rolePriority() {
             return switch (source.role()) {
                 case CONTROLLER -> 0;
@@ -403,15 +505,44 @@ final class CoreRelevantFileEvaluator {
         }
         private RelevantFile toRelevantFile() {
             int score = score();
-            RelevanceLevel level = score >= 50 ? RelevanceLevel.HIGH
-                    : score >= 25 && mediumEligible() ? RelevanceLevel.MEDIUM : RelevanceLevel.LOW;
+            ConfidenceProfile confidence = confidence(score);
             Optional<String> className = source.javaSource() ? Optional.of(source.className()) : Optional.empty();
-            return new RelevantFile(source.path(), className, module, score, level, evidence);
+            return new RelevantFile(source.path(), className, module, responsibility, score, confidence,
+                    matchedCoreTokens, missingCoreTokens, evidence);
         }
-        private boolean mediumEligible() {
-            if (totalCoreTokens < 2 || matchedCoreCount != 1) return true;
-            return structuralEvidenceCount() > 0;
+
+        private ConfidenceProfile confidence(int score) {
+            if (capped()) return new ConfidenceProfile(RelevanceLevel.LOW,
+                    "Confidence is capped because " + responsibility + " has no structural task match.");
+            if (score >= 40 && (strongStructuralMatch || has("FULL_CORE_COVERAGE") && hasStructuralTaskMatch())) {
+                return new ConfidenceProfile(RelevanceLevel.HIGH,
+                        "Strong structural task evidence supports this as a first file to inspect.");
+            }
+            if (score >= 20 && matchedCoreCount >= 2 && executableResponsibilitySupported()) {
+                return new ConfidenceProfile(RelevanceLevel.MEDIUM,
+                        "Matched " + matchedCoreCount + "/" + totalCoreTokens
+                                + " task core keywords in a " + responsibility.name().toLowerCase(Locale.ROOT) + ".");
+            }
+            if (score >= 15 && hasStructuralTaskMatch()) {
+                return new ConfidenceProfile(RelevanceLevel.MEDIUM,
+                        "Direct structural task evidence matched this file.");
+            }
+            if (score >= 20 && totalCoreTokens > 0 && matchedCoreCount == totalCoreTokens) {
+                return new ConfidenceProfile(RelevanceLevel.MEDIUM,
+                        "Matched all " + matchedCoreCount + "/" + totalCoreTokens + " task core keywords.");
+            }
+            return new ConfidenceProfile(RelevanceLevel.LOW, "Only weak or indirect task evidence was found.");
         }
+
+        private boolean executableResponsibilitySupported() {
+            return switch (responsibility) {
+                case CONTROLLER -> source.role() == JavaRole.CONTROLLER;
+                case SERVICE -> source.role() == JavaRole.SERVICE;
+                case BUSINESS -> true;
+                default -> false;
+            };
+        }
+
     }
 
     private record WindowMatch(List<String> coreTokens, List<String> exactPhrases,

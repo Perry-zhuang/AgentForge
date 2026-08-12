@@ -15,9 +15,10 @@ class InspectCommandTest {
         CliTestHarness.Result result = CliTestHarness.execute("inspect", root.toString(), "user login");
 
         assertThat(result.exitCode()).isZero();
-        assertThat(result.output()).contains("AgentForge Task Inspection", "LoginService", "Evidence:",
-                "Core Keywords", "Exact Phrases", "Derived Keywords",
+        assertThat(result.output()).contains("AgentForge Task Inspection", "LoginService", "Responsibility", "Evidence:",
+                "Core Keywords", "Task Phrase", "Related Phrases", "Confidence Reason", "Match",
                 "Related Build Modules", "Related Packages / Source Areas");
+        assertThat(result.output()).doesNotContain("+0", "Derived Keywords", "Exact Phrases");
     }
 
     @Test

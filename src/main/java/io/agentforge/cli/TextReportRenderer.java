@@ -9,13 +9,16 @@ import io.agentforge.model.ContextReport;
 import io.agentforge.model.DiffAuditReport;
 import io.agentforge.model.FileType;
 import io.agentforge.model.JavaRole;
+import io.agentforge.model.MatchEvidence;
 import io.agentforge.model.ProjectTechnology;
 import io.agentforge.model.Recommendation;
 import io.agentforge.model.RepositoryReport;
 import io.agentforge.model.ScoreBreakdown;
 import io.agentforge.model.TaskInspectionReport;
 import java.util.Collection;
+import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
@@ -30,8 +33,8 @@ public class TextReportRenderer {
         section(out, "Task");
         out.append(report.request().task()).append('\n');
         row(out, "Core Keywords", joinedOrNone(report.taskAnalysis().coreTokens()));
-        row(out, "Exact Phrases", joinedOrNone(report.taskAnalysis().exactPhrases()));
-        row(out, "Derived Keywords", joinedOrNone(report.taskAnalysis().derivedTokens()));
+        row(out, "Task Phrase", joinedOrNone(report.taskAnalysis().exactPhrases()));
+        row(out, "Related Phrases", joinedOrNone(meaningfulDerivedPhrases(report)));
         section(out, "Repository");
         row(out, "Path", repository.repository().path());
         technology(out, repository.technology());
@@ -47,10 +50,28 @@ public class TextReportRenderer {
                         .append(file.className().orElseGet(() -> fileName(file.path()))).append('\n');
                 row(out, "   Path", file.path());
                 row(out, "   Score", file.score());
+                row(out, "   Confidence", file.level());
+                row(out, "   Match", file.matchedCoreTokens().size() + "/" + file.totalCoreTokens()
+                        + " core keywords");
                 row(out, "   Module", file.module());
+                row(out, "   Responsibility", file.responsibility());
+                row(out, "   Confidence Reason", file.confidence().reason());
                 out.append("   Evidence:\n");
-                file.evidence().forEach(evidence -> out.append("   - +").append(evidence.points()).append(' ')
-                        .append(evidence.detail()).append('\n'));
+                evidenceGroup(out, "Task", file.evidence(), "CORE_TOKEN", "MULTI_CORE",
+                        "FULL_CORE_COVERAGE", "EXACT_PHRASE", "DERIVED_NGRAM");
+                evidenceGroup(out, "Structure", file.evidence(), "CLASS_OR_FILE", "SOURCE_AREA", "IMPORT",
+                        "DIRECT_DEPENDENCY_TYPE", "JAVA_ROLE");
+                evidenceGroup(out, "Dependency", file.evidence(), "DEPENDENCY", "ARCHITECTURE_NEIGHBOR");
+                evidenceGroup(out, "Context", file.evidence(), "CONTEXT", "SOURCE_AREA_COHORT");
+                if (!file.missingCoreTokens().isEmpty()) {
+                    out.append("   Missing Core Tokens:\n")
+                            .append("   - ").append(String.join(", ", file.missingCoreTokens())).append('\n');
+                }
+                if (file.responsibility().passive() && file.level() == io.agentforge.model.RelevanceLevel.LOW
+                        && file.confidence().reason().startsWith("Confidence is capped")) {
+                    out.append("   Relevance Note:\n")
+                            .append("   - ").append(file.confidence().reason()).append('\n');
+                }
                 out.append('\n');
             }
         }
@@ -73,6 +94,34 @@ public class TextReportRenderer {
             report.warnings().forEach(warning -> out.append("WARN ").append(warning).append('\n'));
         }
         return out.toString();
+    }
+
+    private static List<String> meaningfulDerivedPhrases(TaskInspectionReport report) {
+        List<String> core = report.taskAnalysis().coreTokens();
+        java.util.LinkedHashSet<String> phrases = new java.util.LinkedHashSet<>();
+        for (int index = 0; index + 1 < core.size(); index++) {
+            String compact = core.get(index) + core.get(index + 1);
+            String spaced = core.get(index) + " " + core.get(index + 1);
+            if (report.taskAnalysis().derivedTokens().contains(compact)) phrases.add(compact);
+            else if (report.taskAnalysis().derivedTokens().contains(spaced)) phrases.add(spaced);
+        }
+        return List.copyOf(phrases);
+    }
+
+    private static void evidenceGroup(StringBuilder out, String label, List<MatchEvidence> evidence,
+                                      String... signals) {
+        Set<String> accepted = Set.of(signals);
+        List<MatchEvidence> items = evidence.stream()
+                .filter(item -> item.points() > 0 && accepted.contains(item.signal())).toList();
+        if (items.isEmpty()) return;
+        out.append("   ").append(label).append(":\n");
+        items.forEach(item -> out.append("   - +").append(item.points()).append(' ')
+                .append(evidenceDetail(item)).append('\n'));
+    }
+
+    private static String evidenceDetail(MatchEvidence evidence) {
+        if (evidence.signal().equals("DERIVED_NGRAM")) return "Weak lexical recall signal";
+        return evidence.detail();
     }
 
     public String audit(AuditReport audit) {

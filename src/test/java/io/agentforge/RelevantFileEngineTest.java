@@ -8,6 +8,7 @@ import io.agentforge.model.ContextReport;
 import io.agentforge.model.DependencyEdge;
 import io.agentforge.model.DependencyGraph;
 import io.agentforge.model.FileType;
+import io.agentforge.model.FileResponsibility;
 import io.agentforge.model.JavaRole;
 import io.agentforge.model.JavaTypeInfo;
 import io.agentforge.model.RepositoryStructure;
@@ -56,7 +57,7 @@ class RelevantFileEngineTest {
         assertThat(result.relevantFiles()).extracting(file -> file.className().orElse(""))
                 .contains("A", "BackupHistory").doesNotContain("C", "D");
         assertThat(result.relevantFiles().stream().filter(file -> file.className().orElse("").equals("A")).findFirst().orElseThrow().score())
-                .isEqualTo(10);
+                .isEqualTo(7);
         assertThat(result.relatedFlow()).hasSize(1);
     }
 
@@ -261,28 +262,154 @@ class RelevantFileEngineTest {
         assertThat(file(result, "Service").evidence())
                 .anyMatch(evidence -> evidence.signal().equals("JAVA_ROLE") && evidence.points() == 2);
         assertThat(file(result, "Component").evidence())
-                .anyMatch(evidence -> evidence.signal().equals("JAVA_ROLE") && evidence.points() == 0);
+                .noneMatch(evidence -> evidence.signal().equals("JAVA_ROLE"));
     }
 
     @Test
-    void weakSeedDoesNotExplodeDependenciesButStrongSeedPropagatesOneHop(@TempDir Path root) {
+    void weakTextMatchDoesNotExplodeDependenciesButStructuralSeedPropagatesOneHop(@TempDir Path root) {
         SourceFileIndex weak = java("src/Weak.java", "demo", "Weak", JavaRole.SERVICE, "历史");
         SourceFileIndex a = java("src/A.java", "demo", "A", JavaRole.COMPONENT, "unrelated");
         SourceFileIndex b = java("src/B.java", "demo", "B", JavaRole.COMPONENT, "unrelated");
         SourceFileIndex c = java("src/C.java", "demo", "C", JavaRole.COMPONENT, "unrelated");
         SourceFileIndex d = java("src/D.java", "demo", "D", JavaRole.COMPONENT, "unrelated");
-        SourceFileIndex strong = java("src/Strong.java", "demo", "Strong", JavaRole.SERVICE, "历史告警");
+        SourceFileIndex strong = java("src/HistoryAlertService.java", "demo", "HistoryAlertService",
+                JavaRole.SERVICE, "history alert");
         SourceFileIndex x = java("src/X.java", "demo", "X", JavaRole.COMPONENT, "unrelated");
         List<SourceFileIndex> sources = List.of(weak, a, b, c, d, strong, x);
         DependencyGraph graph = graph(sources, List.of(edge(a, weak), edge(b, weak), edge(c, weak), edge(d, weak),
                 edge(x, strong)));
 
-        var result = evaluate(root, "历史告警", sources, graph, List.of("."), 15);
+        var result = evaluate(root, "history alert", sources, graph, List.of("."), 15);
 
         assertThat(result.relevantFiles()).extracting(file -> file.className().orElse(""))
-                .contains("Strong", "X").doesNotContain("Weak", "A", "B", "C", "D");
+                .contains("HistoryAlertService", "X").doesNotContain("Weak", "A", "B", "C", "D");
         assertThat(file(result, "X").evidence())
-                .anyMatch(evidence -> evidence.signal().equals("DEPENDENCY") && evidence.points() == 10);
+                .anyMatch(evidence -> evidence.signal().equals("DEPENDENCY") && evidence.points() == 7);
+    }
+
+    @Test
+    void businessClassOutranksAndCapsTextOnlyEnum(@TempDir Path root) {
+        SourceFileIndex service = java("src/HistoryAlertSyncService.java", "demo.service", "HistoryAlertSyncService",
+                JavaRole.SERVICE, "历史 告警");
+        SourceFileIndex genericEnum = java("src/GenericModuleEnum.java", "demo.enums", "GenericModuleEnum",
+                JavaRole.OTHER, "enum GenericModuleEnum { 历史, 告警, 同步 }");
+        List<SourceFileIndex> sources = List.of(genericEnum, service);
+
+        var result = evaluate(root, "历史 告警 同步", sources, emptyGraph(sources), List.of("."), 10);
+
+        assertThat(result.relevantFiles()).extracting(file -> file.className().orElse(""))
+                .containsExactly("HistoryAlertSyncService", "GenericModuleEnum");
+        var enumResult = file(result, "GenericModuleEnum");
+        assertThat(enumResult.responsibility()).isEqualTo(FileResponsibility.ENUM);
+        assertThat(enumResult.level()).isEqualTo(io.agentforge.model.RelevanceLevel.LOW);
+        assertThat(enumResult.score()).isLessThanOrEqualTo(24);
+        assertThat(enumResult.confidence().reason()).startsWith("Confidence is capped");
+    }
+
+    @Test
+    void taskDataRanksAboveSupportEnumWhenBothAreTextOnly(@TempDir Path root) {
+        SourceFileIndex request = java("src/GenericRequest.java", "demo.dto", "GenericRequest",
+                JavaRole.OTHER, "历史 告警");
+        SourceFileIndex genericEnum = java("src/GenericEnum.java", "demo.enums", "GenericEnum",
+                JavaRole.OTHER, "enum GenericEnum { 历史告警 }");
+        List<SourceFileIndex> sources = List.of(genericEnum, request);
+
+        var result = evaluate(root, "历史告警", sources, emptyGraph(sources), List.of("."), 10);
+
+        assertThat(result.relevantFiles()).extracting(file -> file.className().orElse(""))
+                .containsExactly("GenericRequest", "GenericEnum");
+        assertThat(result.relevantFiles()).allMatch(file -> file.level() == io.agentforge.model.RelevanceLevel.LOW);
+    }
+
+    @Test
+    void strongRequestFilenameCanExceedPassiveResponsibilityCap(@TempDir Path root) {
+        SourceFileIndex request = java("src/HistoryAlertRequest.java", "demo.api", "HistoryAlertRequest",
+                JavaRole.OTHER, "record HistoryAlertRequest(String value) {}");
+
+        var result = evaluate(root, "history alert", List.of(request), emptyGraph(List.of(request)), List.of("."), 10);
+
+        var requestResult = file(result, "HistoryAlertRequest");
+        assertThat(requestResult.responsibility()).isEqualTo(FileResponsibility.REQUEST);
+        assertThat(requestResult.level()).isNotEqualTo(io.agentforge.model.RelevanceLevel.LOW);
+        assertThat(requestResult.score()).isGreaterThan(24);
+        assertThat(requestResult.confidence().reason()).doesNotStartWith("Confidence is capped");
+    }
+
+    @Test
+    void dependencyBonusCannotOutrankItsStructuralSeed(@TempDir Path root) {
+        SourceFileIndex seed = java("src/HistoryAlertService.java", "demo", "HistoryAlertService",
+                JavaRole.SERVICE, "history alert");
+        SourceFileIndex a = java("src/A.java", "demo", "A", JavaRole.COMPONENT, "unrelated");
+        SourceFileIndex b = java("src/B.java", "demo", "B", JavaRole.COMPONENT, "unrelated");
+        SourceFileIndex c = java("src/C.java", "demo", "C", JavaRole.COMPONENT, "unrelated");
+        List<SourceFileIndex> sources = List.of(a, b, c, seed);
+        DependencyGraph graph = graph(sources, List.of(edge(a, seed), edge(b, seed), edge(c, seed)));
+
+        var result = evaluate(root, "history alert", sources, graph, List.of("."), 10);
+
+        assertThat(result.relevantFiles().get(0).className()).contains("HistoryAlertService");
+        assertThat(file(result, "A").score()).isLessThan(file(result, "HistoryAlertService").score());
+        assertThat(file(result, "B").score()).isLessThan(file(result, "HistoryAlertService").score());
+        assertThat(file(result, "C").score()).isLessThan(file(result, "HistoryAlertService").score());
+    }
+
+    @Test
+    void textOnlyExactPhraseCannotBecomePropagationSeed(@TempDir Path root) {
+        SourceFileIndex textOnly = java("src/GenericProcessor.java", "demo", "GenericProcessor",
+                JavaRole.OTHER, "历史告警");
+        SourceFileIndex caller = java("src/Caller.java", "demo", "Caller", JavaRole.COMPONENT, "unrelated");
+        List<SourceFileIndex> sources = List.of(textOnly, caller);
+        DependencyGraph graph = graph(sources, List.of(edge(caller, textOnly)));
+
+        var result = evaluate(root, "历史告警", sources, graph, List.of("."), 10);
+
+        assertThat(result.relevantFiles()).extracting(file -> file.className().orElse(""))
+                .contains("GenericProcessor").doesNotContain("Caller");
+    }
+
+    @Test
+    void sourceAreaCannotPromoteSingleCoreWeakFileToMedium(@TempDir Path root) {
+        SourceFileIndex first = java("src/auth/AccountService.java", "demo.auth.service", "AccountService",
+                JavaRole.SERVICE, "user");
+        SourceFileIndex second = java("src/auth/ProfileService.java", "demo.auth.service", "ProfileService",
+                JavaRole.SERVICE, "user");
+        List<SourceFileIndex> sources = List.of(first, second);
+
+        var result = evaluate(root, "user login", sources, emptyGraph(sources), List.of("."), 10);
+
+        assertThat(result.relevantFiles()).allMatch(file -> file.level() == io.agentforge.model.RelevanceLevel.LOW);
+        assertThat(result.relevantFiles()).allMatch(file -> file.evidence().stream()
+                .noneMatch(evidence -> evidence.signal().equals("SOURCE_AREA_COHORT")));
+    }
+
+    @Test
+    void classifiesFileResponsibilitiesFromExistingIndexMetadata(@TempDir Path root) {
+        List<SourceFileIndex> sources = List.of(
+                java("src/LoginController.java", "demo", "LoginController", JavaRole.CONTROLLER, "user login"),
+                java("src/LoginServiceImpl.java", "demo", "LoginServiceImpl", JavaRole.COMPONENT, "user login"),
+                java("src/LoginManager.java", "demo", "LoginManager", JavaRole.OTHER, "user login"),
+                java("src/LoginBean.java", "demo", "LoginBean", JavaRole.OTHER, "user login"),
+                java("src/LoginDto.java", "demo", "LoginDto", JavaRole.OTHER, "user login"),
+                java("src/LoginRequest.java", "demo", "LoginRequest", JavaRole.OTHER, "user login"),
+                java("src/LoginResponse.java", "demo", "LoginResponse", JavaRole.OTHER, "user login"),
+                java("src/LoginEnum.java", "demo", "LoginEnum", JavaRole.OTHER, "enum LoginEnum { USER_LOGIN }"),
+                java("src/LoginConfig.java", "demo", "LoginConfig", JavaRole.OTHER, "@Configuration user login"),
+                java("src/LoginUtil.java", "demo.util", "LoginUtil", JavaRole.OTHER, "user login"),
+                java("src/LoginOther.java", "demo", "LoginOther", JavaRole.OTHER, "user login"));
+
+        var result = evaluate(root, "user login", sources, emptyGraph(sources), List.of("."), 15);
+
+        assertThat(file(result, "LoginController").responsibility()).isEqualTo(FileResponsibility.CONTROLLER);
+        assertThat(file(result, "LoginServiceImpl").responsibility()).isEqualTo(FileResponsibility.SERVICE);
+        assertThat(file(result, "LoginManager").responsibility()).isEqualTo(FileResponsibility.BUSINESS);
+        assertThat(file(result, "LoginBean").responsibility()).isEqualTo(FileResponsibility.MODEL);
+        assertThat(file(result, "LoginDto").responsibility()).isEqualTo(FileResponsibility.DTO);
+        assertThat(file(result, "LoginRequest").responsibility()).isEqualTo(FileResponsibility.REQUEST);
+        assertThat(file(result, "LoginResponse").responsibility()).isEqualTo(FileResponsibility.RESPONSE);
+        assertThat(file(result, "LoginEnum").responsibility()).isEqualTo(FileResponsibility.ENUM);
+        assertThat(file(result, "LoginConfig").responsibility()).isEqualTo(FileResponsibility.CONFIG);
+        assertThat(file(result, "LoginUtil").responsibility()).isEqualTo(FileResponsibility.UTIL);
+        assertThat(file(result, "LoginOther").responsibility()).isEqualTo(FileResponsibility.OTHER);
     }
 
     private RelevantFileEngine.Result evaluate(Path root, String task, List<SourceFileIndex> sources,
