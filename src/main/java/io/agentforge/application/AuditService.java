@@ -6,8 +6,10 @@ import io.agentforge.model.ArchitectureReport;
 import io.agentforge.model.AuditReport;
 import io.agentforge.model.ContextReport;
 import io.agentforge.model.RepositoryReport;
+import io.agentforge.model.RecommendationReport;
 import io.agentforge.model.ScoreBreakdown;
 import io.agentforge.policy.ReadinessEngine;
+import io.agentforge.recommendation.RecommendationEngine;
 import io.agentforge.scanner.ArchitectureScanner;
 import io.agentforge.scanner.ContextScanner;
 import io.agentforge.scanner.RepositoryScanner;
@@ -24,15 +26,17 @@ public class AuditService {
     private final ArchitectureScanner architectureScanner;
     private final ConfigLoader configLoader;
     private final ReadinessEngine readinessEngine;
+    private final RecommendationEngine recommendationEngine;
 
     public AuditService(RepositoryScanner repositoryScanner, ContextScanner contextScanner,
                         ArchitectureScanner architectureScanner, ConfigLoader configLoader,
-                        ReadinessEngine readinessEngine) {
+                        ReadinessEngine readinessEngine, RecommendationEngine recommendationEngine) {
         this.repositoryScanner = repositoryScanner;
         this.contextScanner = contextScanner;
         this.architectureScanner = architectureScanner;
         this.configLoader = configLoader;
         this.readinessEngine = readinessEngine;
+        this.recommendationEngine = recommendationEngine;
     }
 
     public AuditReport audit(Path requestedPath) {
@@ -44,7 +48,7 @@ public class AuditService {
         ArchitectureReport architecture = architectureScanner.scan(root, scan.files(), contract);
         List<ScoreBreakdown> scores = readinessEngine.evaluate(root, scan.repository(), scan.structure(), context,
                 architecture, policy.config(), !policy.defaultUsed());
-        int overall = (int) Math.round(scores.stream().mapToInt(ScoreBreakdown::score).average().orElse(0));
+        int overall = ReadinessEngine.overallScore(scores);
         List<String> warnings = new ArrayList<>();
         warnings.addAll(scan.repository().warnings());
         warnings.addAll(scan.structure().warnings());
@@ -60,6 +64,10 @@ public class AuditService {
         if (scan.structure().testFiles() == 0) warnings.add("Low test presence: no source tests detected");
         if (!architecture.possibleLayerBypasses().isEmpty()) warnings.add("Possible layer bypass detected");
         RepositoryReport repositoryReport = new RepositoryReport(scan.repository(), scan.technology(), scan.structure(), context, architecture);
-        return new AuditReport(repositoryReport, scores, overall, warnings.stream().distinct().toList());
+        RecommendationReport recommendations = recommendationEngine.evaluate(root, repositoryReport, scores,
+                policy.config(), !policy.defaultUsed());
+        return new AuditReport(repositoryReport, scores, overall,
+                policy.config().readiness().testability().minimumTestRatio(), recommendations,
+                warnings.stream().distinct().toList());
     }
 }

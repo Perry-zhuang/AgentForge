@@ -10,6 +10,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import org.springframework.stereotype.Component;
 
 @Component
@@ -48,7 +49,7 @@ public class ReadinessEngine {
         score.add(context.architectureDocumentPresent(), weights.architectureDoc(), "Architecture document");
         score.add(report.contractConfigured(), weights.architectureContract(), "Architecture contract");
         score.add(!structure.modules().isEmpty() || structure.sourceFiles() > 0, weights.recognizableStructure(), "Recognizable project structure");
-        score.add(report.possibleLayerBypasses().isEmpty(), weights.noLayerBypass(), "No possible layer bypass");
+        score.add(report.possibleLayerBypasses().isEmpty(), weights.noLayerBypass(), "No detectable layer bypass");
         return score.build();
     }
 
@@ -68,9 +69,15 @@ public class ReadinessEngine {
                                        PolicyConfig.TestabilityWeights weights) {
         ScoreBuilder score = new ScoreBuilder("Testability");
         score.add(structure.testFiles() > 0, weights.testsPresent(), "Tests present");
-        double ratio = structure.sourceFiles() == 0 ? 0 : (double) structure.testFiles() / structure.sourceFiles();
-        score.add(ratio >= weights.minimumTestRatio(), weights.testRatio(),
-                "Test/source ratio >= " + weights.minimumTestRatio());
+        double ratio = structure.testFileRatio();
+        if (ratio >= weights.minimumTestRatio()) {
+            score.addWithFailure(true, weights.testRatio(),
+                    "Test file ratio >= " + percentage(weights.minimumTestRatio(), 0), "");
+        } else {
+            score.addWithFailure(false, weights.testRatio(), "",
+                    "Test file ratio below " + percentage(weights.minimumTestRatio(), 0)
+                            + " (current " + percentage(ratio, 2) + ")");
+        }
         score.add(context.testingRulesPresent(), weights.testingRules(), "Testing rules");
         return score.build();
     }
@@ -105,8 +112,25 @@ public class ReadinessEngine {
             details.add("-" + points + " " + label);
         }
 
+        private void addWithFailure(boolean present, int points, String successLabel, String failureLabel) {
+            if (present) {
+                score += points;
+                details.add("+" + points + " " + successLabel);
+            } else {
+                details.add("+0 " + failureLabel);
+            }
+        }
+
         private ScoreBreakdown build() {
             return new ScoreBreakdown(name, Math.max(0, Math.min(100, score)), details);
         }
+    }
+
+    public static int overallScore(List<ScoreBreakdown> scores) {
+        return (int) Math.round(scores.stream().mapToInt(ScoreBreakdown::score).average().orElse(0));
+    }
+
+    private String percentage(double ratio, int decimals) {
+        return String.format(Locale.ROOT, "%." + decimals + "f%%", ratio * 100);
     }
 }

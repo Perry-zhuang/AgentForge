@@ -19,4 +19,8 @@ public record RepositoryStructure(
     public int count(FileType type) {
         return fileCounts.getOrDefault(type, 0);
     }
+
+    public double testFileRatio() {
+        return sourceFiles == 0 ? 0 : (double) testFiles / sourceFiles;
+    }
 }

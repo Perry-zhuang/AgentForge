@@ -10,6 +10,7 @@ public record ArchitectureReport(
         List<DependencyEdge> possibleLayerBypasses,
         List<DependencyEdge> contractViolations,
         boolean contractConfigured,
+        ArchitectureAnalysisMode analysisMode,
         List<String> warnings
 ) {
     public ArchitectureReport {
@@ -17,6 +18,7 @@ public record ArchitectureReport(
         relationCounts = Map.copyOf(relationCounts);
         possibleLayerBypasses = List.copyOf(possibleLayerBypasses);
         contractViolations = List.copyOf(contractViolations);
+        if (analysisMode == null) throw new IllegalArgumentException("Architecture analysis mode is required");
         warnings = List.copyOf(warnings);
     }
 }

@@ -64,6 +64,6 @@ public class DiffAuditService {
                         .filter(edge -> changedPaths.contains(report.graph().nodes().get(edge.from()).path())).toList(),
                 report.contractViolations().stream()
                         .filter(edge -> changedPaths.contains(report.graph().nodes().get(edge.from()).path())).toList(),
-                report.contractConfigured(), report.warnings());
+                report.contractConfigured(), report.analysisMode(), report.warnings());
     }
 }

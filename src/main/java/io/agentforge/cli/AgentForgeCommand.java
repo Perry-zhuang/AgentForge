@@ -7,7 +7,7 @@ import picocli.CommandLine.Command;
 @Command(
         name = "agentforge",
         mixinStandardHelpOptions = true,
-        version = "AgentForge 0.1.0-SNAPSHOT",
+        version = "AgentForge 0.1.1-SNAPSHOT",
         description = "Audit repository readiness and local Git changes for coding agents.",
         subcommands = {AuditCommand.class, InitCommand.class, DiffCommand.class}
 )

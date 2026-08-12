@@ -1,6 +1,7 @@
 package io.agentforge.scanner;
 
 import io.agentforge.model.ArchitectureContract;
+import io.agentforge.model.ArchitectureAnalysisMode;
 import io.agentforge.model.ArchitectureReport;
 import io.agentforge.model.DependencyEdge;
 import io.agentforge.model.DependencyGraph;
@@ -82,7 +83,7 @@ public class ArchitectureScanner {
             if (contract.isPresent() && violates(edge, contract.get())) violations.add(edge);
         }
         return new ArchitectureReport(new DependencyGraph(nodes, edges), roleCounts, relations, bypasses,
-                violations, contract.isPresent(), warnings);
+                violations, contract.isPresent(), ArchitectureAnalysisMode.LIGHTWEIGHT, warnings);
     }
 
     private boolean violates(DependencyEdge edge, ArchitectureContract contract) {

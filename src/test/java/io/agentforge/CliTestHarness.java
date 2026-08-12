@@ -16,6 +16,7 @@ import io.agentforge.policy.MinimalChangeEngine;
 import io.agentforge.policy.PolicyEngine;
 import io.agentforge.policy.ReadinessEngine;
 import io.agentforge.risk.RiskEngine;
+import io.agentforge.recommendation.RecommendationEngine;
 import io.agentforge.scanner.ArchitectureScanner;
 import io.agentforge.scanner.ContextScanner;
 import io.agentforge.scanner.RepositoryScanner;
@@ -36,7 +37,7 @@ final class CliTestHarness {
         ConfigLoader configLoader = new ConfigLoader();
         ReadinessEngine readinessEngine = new ReadinessEngine();
         AuditService auditService = new AuditService(repositoryScanner, contextScanner, architectureScanner,
-                configLoader, readinessEngine);
+                configLoader, readinessEngine, new RecommendationEngine(readinessEngine));
         InitService initService = new InitService();
         GitChangeScanner changeScanner = new GitChangeScanner(git, inspector);
         DiffAuditService diffService = new DiffAuditService(changeScanner, repositoryScanner, architectureScanner,

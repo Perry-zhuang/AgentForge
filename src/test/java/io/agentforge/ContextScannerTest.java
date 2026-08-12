@@ -63,7 +63,7 @@ class ContextScannerTest {
         RepositoryInfo repository = new RepositoryInfo(root, false, null, "N/A", "N/A", false, List.of());
         RepositoryStructure structure = new RepositoryStructure(List.of(), Map.of(), 0, 0, List.of());
         ArchitectureReport architecture = new ArchitectureReport(new DependencyGraph(Map.of(), List.of()), Map.of(), Map.of(),
-                List.of(), List.of(), false, List.of());
+                List.of(), List.of(), false, io.agentforge.model.ArchitectureAnalysisMode.LIGHTWEIGHT, List.of());
 
         var scores = new ReadinessEngine().evaluate(root, repository, structure, context, architecture, config, false);
 

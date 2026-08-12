@@ -93,7 +93,7 @@ class PolicyEngineTest {
 
     private ArchitectureReport emptyArchitecture() {
         return new ArchitectureReport(new DependencyGraph(Map.of(), List.of()), Map.of(), Map.of(),
-                List.of(), List.of(), false, List.of());
+                List.of(), List.of(), false, io.agentforge.model.ArchitectureAnalysisMode.LIGHTWEIGHT, List.of());
     }
 
     private ChangedFile file(String path) {

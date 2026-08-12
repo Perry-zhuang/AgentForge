@@ -3,6 +3,7 @@ package io.agentforge;
 import static org.assertj.core.api.Assertions.assertThat;
 
 import io.agentforge.model.ArchitectureContract;
+import io.agentforge.model.ArchitectureAnalysisMode;
 import io.agentforge.model.ArchitectureReport;
 import io.agentforge.model.JavaRole;
 import io.agentforge.scanner.ArchitectureScanner;
@@ -13,6 +14,9 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.api.io.TempDir;
 
 class ArchitectureScannerTest {
@@ -75,8 +79,29 @@ class ArchitectureScannerTest {
         ArchitectureReport report = scan(root, Optional.empty());
 
         assertThat(report.contractConfigured()).isFalse();
+        assertThat(report.analysisMode()).isEqualTo(ArchitectureAnalysisMode.LIGHTWEIGHT);
         assertThat(report.possibleLayerBypasses()).hasSize(1);
         assertThat(report.contractViolations()).isEmpty();
+    }
+
+    @ParameterizedTest
+    @MethodSource("roleAnnotations")
+    void appliesStableBeanRolePriority(String annotations, JavaRole expected, @TempDir Path root) throws Exception {
+        write(root, "src/Bean.java", "package demo; " + annotations + " class Bean {}");
+
+        ArchitectureReport report = scan(root, Optional.empty());
+
+        assertThat(report.graph().nodes().get("demo.Bean").role()).isEqualTo(expected);
+    }
+
+    private static java.util.stream.Stream<Arguments> roleAnnotations() {
+        return java.util.stream.Stream.of(
+                Arguments.of("@Service", JavaRole.SERVICE),
+                Arguments.of("@Component", JavaRole.COMPONENT),
+                Arguments.of("@Service @Component", JavaRole.SERVICE),
+                Arguments.of("@Repository @Component", JavaRole.REPOSITORY),
+                Arguments.of("@Mapper @Component", JavaRole.MAPPER),
+                Arguments.of("@RestController @Component", JavaRole.CONTROLLER));
     }
 
     private ArchitectureReport scan(Path root, Optional<ArchitectureContract> contract) {

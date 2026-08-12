@@ -10,6 +10,7 @@ import io.agentforge.model.DiffAuditReport;
 import io.agentforge.model.FileType;
 import io.agentforge.model.JavaRole;
 import io.agentforge.model.ProjectTechnology;
+import io.agentforge.model.Recommendation;
 import io.agentforge.model.RepositoryReport;
 import io.agentforge.model.ScoreBreakdown;
 import java.util.Collection;
@@ -42,7 +43,6 @@ public class TextReportRenderer {
                 + report.structure().count(FileType.VUE);
         row(out, "Frontend Files", frontendFiles);
         row(out, "SQL Files", report.structure().count(FileType.SQL));
-        row(out, "Tests", report.structure().testFiles());
         section(out, "AI Context");
         row(out, "AGENTS.md", context.agentsPresent() ? "FOUND (" + context.agentsLines() + " lines)" : "MISSING");
         row(out, "README.md", context.readmePresent() ? "FOUND" : "MISSING");
@@ -55,6 +55,7 @@ public class TextReportRenderer {
         row(out, "API Rules", found(context.apiRulesPresent()));
         row(out, "Test Rules", found(context.testingRulesPresent()));
         section(out, "Architecture");
+        row(out, "Analysis Mode", architecture.analysisMode());
         row(out, "Contract", architecture.contractConfigured() ? "CONFIGURED" : "NOT CONFIGURED");
         row(out, "Controller", architecture.roleCounts().getOrDefault(JavaRole.CONTROLLER, 0));
         row(out, "Service", architecture.roleCounts().getOrDefault(JavaRole.SERVICE, 0));
@@ -65,6 +66,11 @@ public class TextReportRenderer {
                 .append(edge.from()).append(" -> ").append(edge.to()).append('\n'));
         architecture.contractViolations().forEach(edge -> out.append("WARN Architecture Contract Violation: ")
                 .append(edge.from()).append(" -> ").append(edge.to()).append('\n'));
+        section(out, "Testability");
+        row(out, "Source Files", report.structure().sourceFiles());
+        row(out, "Test Files", report.structure().testFiles());
+        row(out, "Test File Ratio", percentage(report.structure().testFileRatio(), 2));
+        row(out, "Recommended Threshold", percentage(audit.testFileRatioThreshold(), 0));
         section(out, "Potential Risks");
         if (audit.warnings().isEmpty()) out.append("None\n");
         else audit.warnings().forEach(warning -> out.append("WARN ").append(warning).append('\n'));
@@ -75,6 +81,23 @@ public class TextReportRenderer {
         });
         out.append('\n');
         row(out, "Overall Score", audit.overallScore() + " / 100");
+        section(out, "Top Recommendations");
+        if (audit.recommendationReport().recommendations().isEmpty()) {
+            out.append("No high-value recommendations.\n");
+        } else {
+            int index = 1;
+            for (Recommendation recommendation : audit.recommendationReport().recommendations().stream().limit(5).toList()) {
+                out.append(index++).append(". [").append(recommendation.priority()).append("] ")
+                        .append(recommendation.title()).append('\n');
+                out.append("   Why:\n");
+                indented(out, recommendation.reason(), "   ");
+                out.append("   Action:\n");
+                indented(out, recommendation.action(), "   ");
+                out.append("   Evidence:\n");
+                recommendation.evidence().forEach(item -> out.append("   - ").append(item).append('\n'));
+                out.append("   Estimated Overall Impact: +").append(recommendation.estimatedImpact()).append("\n\n");
+            }
+        }
         return out.toString();
     }
 
@@ -177,4 +200,10 @@ public class TextReportRenderer {
     private String found(boolean value) { return value ? "FOUND" : "MISSING"; }
     private String pass(boolean value) { return value ? "PASS" : "FAIL"; }
     private String shortHead(String head) { return head != null && head.length() > 12 ? head.substring(0, 12) : head; }
+    private String percentage(double ratio, int decimals) {
+        return String.format(Locale.ROOT, "%." + decimals + "f%%", ratio * 100);
+    }
+    private void indented(StringBuilder out, String value, String indentation) {
+        value.lines().forEach(line -> out.append(indentation).append(line).append('\n'));
+    }
 }

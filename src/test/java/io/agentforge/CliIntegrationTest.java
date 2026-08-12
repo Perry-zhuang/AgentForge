@@ -17,7 +17,7 @@ class CliIntegrationTest {
         assertThat(help.exitCode()).isZero();
         assertThat(help.output()).contains("audit", "init", "diff");
         assertThat(version.exitCode()).isZero();
-        assertThat(version.output()).contains("AgentForge 0.1.0-SNAPSHOT");
+        assertThat(version.output()).contains("AgentForge 0.1.1-SNAPSHOT");
     }
 
     @Test
@@ -34,9 +34,13 @@ class CliIntegrationTest {
         CliTestHarness.Result full = CliTestHarness.execute("audit", "examples/spring-vue-demo");
 
         assertThat(spring.exitCode()).isZero();
-        assertThat(spring.output()).contains("SPRING BOOT", "controller -> service");
+        assertThat(spring.output()).contains("SPRING BOOT", "controller -> service",
+                "Analysis Mode            LIGHTWEIGHT", "Test File Ratio",
+                "+25 Test file ratio >= 10%", "Top Recommendations", "Estimated Overall Impact");
         assertThat(full.exitCode()).isZero();
-        assertThat(full.output()).contains("VUE", "MYSQL", "Possible Layer Bypass");
+        assertThat(full.output()).contains("VUE", "MYSQL", "Possible Layer Bypass",
+                "+0 Test file ratio below 10% (current 0.00%)");
+        assertThat(spring.output()).doesNotContain("No possible layer bypass");
     }
 
     @Test

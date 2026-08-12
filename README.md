@@ -4,7 +4,7 @@ AgentForge is a local AI Engineering control plane and repository governance CLI
 
 AgentForge does not write code. It analyzes the repository and the current change before or after a Coding Agent works on it.
 
-V0.1 focuses on five deterministic governance capabilities:
+V0.1.1 focuses on five deterministic governance capabilities:
 
 - Repository Audit
 - Architecture Contract
@@ -29,7 +29,19 @@ java -jar target/agentforge.jar diff /path/to/project
 
 ### `agentforge audit`
 
-Scans repository technology, structure, AI context, architecture, and readiness.
+Scans repository technology, structure, AI context, architecture, and readiness, then reports the highest-value actions for improving Coding Agent readiness.
+
+### Actionable Recommendations
+
+Audit results combine four deterministic elements:
+
+```text
+Score + Evidence + Recommended Action + Estimated Impact
+```
+
+Recommendations are derived from the active readiness configuration. Estimated impact means the calculated change to the current overall readiness score if that single condition were satisfied; it is an estimate, not a promise, and separate recommendations are not cumulative guarantees.
+
+`Test File Ratio` is the number of detected test files divided by detected source files. It is a repository signal and must not be interpreted as code coverage.
 
 ### `agentforge init`
 
@@ -47,7 +59,7 @@ The CLI delegates to application services, which coordinate scanners and pure po
 
 ### Architecture Analysis
 
-V0.1 uses lightweight static analysis rather than a complete AST or semantic engine. It detects direct field dependencies and constructor dependencies using explicit imports or same-package resolution.
+V0.1.1 reports Architecture Analysis Mode as `LIGHTWEIGHT`. This means AgentForge uses deterministic source heuristics rather than a complete AST or semantic engine. It detects direct field dependencies and constructor dependencies using explicit imports or same-package resolution.
 
 It does not guarantee detection of generic-wrapped dependencies, reflection, runtime dependency injection, method-level call graphs, dynamic Spring bean resolution, Lombok-generated constructors, complex nested classes, or ambiguous simple class names.
 
@@ -57,11 +69,11 @@ It does not guarantee detection of generic-wrapped dependencies, reflection, run
 
 ### Architecture Diff
 
-V0.1 reports architecture findings present in changed source files. It does not compare complete HEAD and working-tree dependency graphs, so it does not claim that a finding was introduced by the exact current diff.
+V0.1.1 reports architecture findings present in changed source files. It does not compare complete HEAD and working-tree dependency graphs, so it does not claim that a finding was introduced by the exact current diff.
 
 ### AI
 
-V0.1 has no LLM calls, Agent execution, or Codex integration. Its findings are deterministic, rule-based, and explainable.
+V0.1.1 has no LLM calls, Agent execution, or Codex integration. Its findings are deterministic, rule-based, and explainable.
 
 ## Roadmap
 
