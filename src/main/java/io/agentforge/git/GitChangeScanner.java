@@ -11,7 +11,6 @@ import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Set;
 import org.springframework.stereotype.Component;
 
@@ -38,30 +37,14 @@ public class GitChangeScanner {
         List<ChangedFile> files = parsePorcelain(result.output(), scope);
         Set<String> moduleRoots = findModuleRoots(target);
         Set<String> changedModules = new LinkedHashSet<>();
-        boolean config = false;
-        boolean dependency = false;
-        boolean database = false;
-        boolean security = false;
-        boolean agents = false;
-        boolean controller = false;
+        List<String> changedPaths = new ArrayList<>();
         for (ChangedFile file : files) {
             changedModules.add(resolveModule(file.path(), moduleRoots));
-            for (String path : paths(file)) {
-                String lower = path.toLowerCase(Locale.ROOT);
-                String base = lower.substring(lower.lastIndexOf('/') + 1);
-                config |= lower.endsWith(".yml") || lower.endsWith(".yaml") || lower.endsWith(".properties")
-                        || base.startsWith(".env") || lower.contains("/config/");
-                dependency |= RepositoryScanner.isBuildDescriptor(base) || base.endsWith("lock")
-                        || base.equals("yarn.lock") || base.equals("pnpm-lock.yaml");
-                database |= lower.endsWith(".sql") || lower.contains("/migration/") || lower.startsWith("database/")
-                        || lower.contains("/db/migration/");
-                security |= lower.startsWith("security/") || lower.contains("/security/");
-                agents |= base.equals("agents.md") || base.equals("claude.md") || lower.startsWith(".agentforge/");
-                controller |= base.endsWith("controller.java") || lower.contains("/controller/");
-            }
+            changedPaths.addAll(paths(file));
         }
-        return new ChangeReport(repository, files, changedModules, config, dependency, database,
-                security, agents, controller, repository.warnings());
+        ChangeSignalClassifier.Signals signals = ChangeSignalClassifier.classify(changedPaths);
+        return new ChangeReport(repository, files, changedModules, signals.config(), signals.dependency(),
+                signals.database(), signals.security(), signals.agents(), signals.controller(), repository.warnings());
     }
 
     List<ChangedFile> parsePorcelain(String output, String scope) {

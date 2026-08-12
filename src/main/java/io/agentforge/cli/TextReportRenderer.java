@@ -7,9 +7,14 @@ import io.agentforge.model.ChangeReport;
 import io.agentforge.model.ChangeStatus;
 import io.agentforge.model.ContextReport;
 import io.agentforge.model.DiffAuditReport;
+import io.agentforge.model.EngineeringPlan;
+import io.agentforge.model.EstimatedChangeScope;
 import io.agentforge.model.FileType;
+import io.agentforge.model.GitBaseline;
 import io.agentforge.model.JavaRole;
 import io.agentforge.model.MatchEvidence;
+import io.agentforge.model.PlanConstraint;
+import io.agentforge.model.PlanScope;
 import io.agentforge.model.ProjectTechnology;
 import io.agentforge.model.Recommendation;
 import io.agentforge.model.RepositoryReport;
@@ -24,6 +29,158 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class TextReportRenderer {
+    public String plan(EngineeringPlan plan) {
+        StringBuilder out = new StringBuilder();
+        out.append("╭─────────────────────────────────╮\n")
+                .append("│ AgentForge Engineering Plan     │\n")
+                .append("╰─────────────────────────────────╯\n");
+        planSection(out, "Task");
+        out.append(plan.task()).append("\n\n");
+        row(out, "Type", plan.taskType());
+        row(out, "Type Signal", plan.taskTypeSignal());
+        row(out, "Plan Confidence", plan.confidence());
+
+        planSection(out, "Repository");
+        row(out, "Path", plan.repository().repository().path());
+        technology(out, plan.repository().technology());
+
+        planSection(out, "Git Baseline");
+        GitBaseline baseline = plan.gitBaseline();
+        row(out, "Branch", baseline.branch());
+        row(out, "HEAD", shortHead(baseline.head()));
+        row(out, "Working Tree", baseline.workingTree());
+        row(out, "Changed", baseline.available() ? baseline.changedFiles() + " files" : "N/A");
+        renderWarnings(out, plan);
+
+        planSection(out, "Likely Scope");
+        if (!plan.reliableScope()) {
+            out.append("PLAN CONFIDENCE LOW\n\n")
+                    .append("No reliable implementation scope could be derived.\n\n")
+                    .append("Recommendation:\n")
+                    .append("Refine the task description or run inspect with a more specific task.\n");
+            if (!plan.scope().reference().isEmpty()) {
+                out.append("\nREFERENCE — read-only context\n\n");
+                renderScopeFiles(out, plan.scope().reference());
+            }
+        } else {
+            renderScope(out, plan.scope());
+        }
+
+        planSection(out, "Architecture Constraints");
+        boolean contractConfigured = plan.repository().architecture().contractConfigured();
+        row(out, "Contract", contractConfigured ? "CONFIGURED" : "NOT CONFIGURED");
+        if (contractConfigured) {
+            List<String> layers = constraints(plan, PlanConstraint.Kind.ARCHITECTURE_LAYER);
+            row(out, "Layers", layers.isEmpty() ? "None" : String.join(", ", layers));
+            out.append("\nAllowed:\n\n");
+            List<String> allowed = new java.util.ArrayList<>(
+                    constraints(plan, PlanConstraint.Kind.ARCHITECTURE_ALLOWED));
+            allowed.addAll(constraints(plan, PlanConstraint.Kind.ARCHITECTURE_UNDECLARED));
+            if (allowed.isEmpty()) out.append("- None configured\n");
+            else allowed.forEach(item -> out.append("- ").append(item).append('\n'));
+        } else {
+            row(out, "Analysis Mode", plan.repository().architecture().analysisMode());
+            List<String> observed = constraints(plan, PlanConstraint.Kind.OBSERVED_FLOW);
+            if (!observed.isEmpty()) {
+                out.append("\nObserved Related Flow (lightweight, not a contract):\n\n");
+                observed.forEach(item -> out.append("- ").append(item).append('\n'));
+            }
+        }
+
+        planSection(out, "Do Not Touch");
+        if (plan.defaultPolicyUsed()) out.append("Policy:\nBuilt-in defaults are being used.\n\n");
+        List<String> doNotTouch = new java.util.ArrayList<>(
+                constraints(plan, PlanConstraint.Kind.POLICY_DENY));
+        doNotTouch.addAll(constraints(plan, PlanConstraint.Kind.POLICY_PROTECTED));
+        if (doNotTouch.isEmpty()) out.append("- None configured\n");
+        else doNotTouch.forEach(path -> out.append("- ").append(path).append('\n'));
+
+        planSection(out, "Recommended Strategy");
+        plan.steps().forEach(step -> out.append(step.order()).append(". ")
+                .append(step.description()).append('\n'));
+
+        planSection(out, "Estimated Change Scope");
+        EstimatedChangeScope estimate = plan.estimatedChangeScope();
+        String files = estimate.minimumFiles() == estimate.maximumFiles()
+                ? Integer.toString(estimate.minimumFiles())
+                : estimate.minimumFiles() + "–" + estimate.maximumFiles();
+        row(out, "Files", files + " (Estimated)");
+        row(out, "Modules", estimate.modules() + " (Estimated)");
+        row(out, "Database Change", upperYesNo(estimate.databaseChange()));
+        row(out, "Dependency Change", upperYesNo(estimate.dependencyChange()));
+        row(out, "Security Change", upperYesNo(estimate.securityChange()));
+        row(out, "Config Change", upperYesNo(estimate.configChange()));
+
+        planSection(out, "Pre-Implementation Risk");
+        row(out, "Level", plan.preImplementationRisk().level());
+        row(out, "Score", plan.preImplementationRisk().score());
+        out.append("\nFactors:\n\n");
+        if (plan.preImplementationRisk().factors().isEmpty()) out.append("- None\n");
+        else plan.preImplementationRisk().factors().forEach(factor -> out.append("- +")
+                .append(factor.points()).append(' ').append(factor.reason()).append('\n'));
+
+        planSection(out, "Test Plan");
+        int testNumber = 1;
+        for (var test : plan.tests()) {
+            out.append(testNumber++).append(". ").append(test.description()).append('\n');
+        }
+
+        planSection(out, "Acceptance Criteria");
+        plan.acceptanceCriteria().forEach(criterion -> out.append("- ")
+                .append(criterion.description()).append('\n'));
+        return out.toString();
+    }
+
+    private void renderScope(StringBuilder out, PlanScope scope) {
+        out.append("PRIMARY — likely change targets\n\n");
+        renderScopeFiles(out, scope.primary());
+        out.append("\nSECONDARY — inspect before changing\n\n");
+        renderScopeFiles(out, scope.secondary());
+        out.append("\nREFERENCE — read-only context\n\n");
+        renderScopeFiles(out, scope.reference());
+    }
+
+    private void renderScopeFiles(StringBuilder out, List<io.agentforge.model.RelevantFile> files) {
+        if (files.isEmpty()) out.append("- None\n");
+        else {
+            int index = 1;
+            for (var file : files) {
+                out.append(index++).append(". ").append(fileName(file.path())).append('\n')
+                        .append("   ").append(file.path()).append('\n');
+            }
+        }
+    }
+
+    private List<String> constraints(EngineeringPlan plan, PlanConstraint.Kind kind) {
+        return plan.constraints().stream().filter(constraint -> constraint.kind() == kind)
+                .map(PlanConstraint::description).toList();
+    }
+
+    private void renderWarnings(StringBuilder out, EngineeringPlan plan) {
+        List<String> visibleWarnings = plan.warnings().stream()
+                .filter(warning -> !warning.equals("Built-in policy defaults are being used."))
+                .toList();
+        if (visibleWarnings.isEmpty()) return;
+        planSection(out, "Warnings");
+        boolean dirtyHeading = false;
+        for (String warning : visibleWarnings) {
+            if (warning.equals("Existing working tree changes detected.")) {
+                out.append("WARNING:\n").append(warning).append('\n');
+                dirtyHeading = true;
+            } else if (dirtyHeading && warning.equals("Plan scope may overlap with existing changes.")) {
+                out.append(warning).append('\n');
+                dirtyHeading = false;
+            } else {
+                out.append("WARNING: ").append(warning).append('\n');
+                dirtyHeading = false;
+            }
+        }
+    }
+
+    private void planSection(StringBuilder out, String title) {
+        out.append("\n## ").append(title).append("\n\n");
+    }
+
     public String inspect(TaskInspectionReport report) {
         RepositoryReport repository = report.repositoryReport();
         StringBuilder out = new StringBuilder();
@@ -305,6 +462,7 @@ public class TextReportRenderer {
     }
 
     private String yesNo(boolean value) { return value ? "Yes" : "No"; }
+    private String upperYesNo(boolean value) { return value ? "YES" : "NO"; }
     private String found(boolean value) { return value ? "FOUND" : "MISSING"; }
     private String pass(boolean value) { return value ? "PASS" : "FAIL"; }
     private String shortHead(String head) { return head != null && head.length() > 12 ? head.substring(0, 12) : head; }

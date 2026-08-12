@@ -55,3 +55,30 @@ all inputs -> Relevant File Engine -> Task Inspection Report -> Text Renderer
 Source-area cohort scoring is only applied to the strongest concentration of exact, multi-core, full-coverage, or strong class/file/package seeds and excludes passive data/configuration areas such as DTO, VO, entity, enum, constants, util, and config packages. Dependency evidence cannot propagate from single-core or derived-only matches and never recurses beyond one hop. These are general false-positive controls, not repository-specific rules. Scores are fixed and explainable; no network, LLM, vector store, business dictionary, or random behavior participates.
 
 Inspection deliberately keeps score, ordering, and confidence separate. Score is the sum of positive evidence. Ordering continues to use the P1.2 structural/semantic/responsibility/dependency comparator. `ConfidenceProfile` classifies the already-ranked result using core coverage, structural evidence, executable responsibility, and the passive-file cap; confidence never participates in ordering. The renderer exposes positive evidence in task, structure, dependency, and context groups, while missing core tokens and responsibility are descriptive rather than artificial zero-point evidence.
+
+## V0.2 P2 Engineering Plan Flow
+
+```text
+Task -> InspectService -> TaskInspectionReport
+TaskInspectionReport + Architecture Contract + Policies + Git Baseline
+    -> PlanEngine -> EngineeringPlan -> Text Renderer
+```
+
+`PlanService` is application orchestration. It invokes `InspectService` once, loads the active configuration, records the current Git baseline without modifying it, and passes immutable inputs to `PlanEngine`. `PlanEngine` does not scan source files and does not call or reproduce `RelevantFileEngine`. Its scope may contain only files already present in `TaskInspectionReport`.
+
+Scope grouping is deterministic. HIGH and flow-linked MEDIUM inspect results are PRIMARY candidates; if fewer than three candidates exist, already-ranked MEDIUM results may fill the remaining PRIMARY positions. Other MEDIUM and flow-linked LOW results are supporting scope, while remaining inspect results are references. PRIMARY means likely change targets, SECONDARY means inspect before changing, and REFERENCE means read-only context by default. Evidence shortfalls lower `PlanConfidence`; planning never compensates by adding business dictionaries, semantic inference, or newly discovered files.
+
+Architecture contracts and policy paths are constraints. Lightweight architecture findings are labeled as observations and are never presented as configured contracts. `PlanRiskEngine` reports pre-implementation risk from the known scope and baseline, including calibrated dirty-file volume and Git overlap with PRIMARY or SECONDARY scope. A renamed Git entry remains one logical changed file even when its old and new paths both match. The existing `RiskEngine` continues to report risk in current Git changes; these risk meanings and models remain separate.
+
+`PlanTestAdvisor` consumes only the repository report, existing scope responsibilities and architecture roles, task type, testability ratio, and related flow. It deterministically orders repository-native tests, task-type checks, scope-specific scheduler/API/persistence checks, integration checks, manual regression guidance, and the post-implementation diff audit. It performs no repository or source scan.
+
+The command boundaries are:
+
+```text
+audit   = Understand repository readiness
+inspect = Locate known relevant files
+plan    = Organize known facts into a safe implementation plan
+diff    = Evaluate current working-tree changes
+```
+
+Planning is read-only: it does not initialize `.agentforge`, write caches in the target repository, edit governance files, change Git state, generate prompts, or execute a Coding Agent.

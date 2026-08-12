@@ -8,8 +8,8 @@ import picocli.CommandLine.Command;
         name = "agentforge",
         mixinStandardHelpOptions = true,
         version = "AgentForge 0.2.0-SNAPSHOT",
-        description = "Inspect and audit repositories for coding-agent workflows.",
-        subcommands = {AuditCommand.class, InitCommand.class, DiffCommand.class, InspectCommand.class}
+        description = "Inspect, plan, and audit repositories for coding-agent workflows.",
+        subcommands = {AuditCommand.class, InitCommand.class, DiffCommand.class, InspectCommand.class, PlanCommand.class}
 )
 public class AgentForgeCommand implements Runnable {
     @Override

@@ -4,9 +4,10 @@ AgentForge is a local AI Engineering control plane and repository governance CLI
 
 AgentForge does not write code. It analyzes the repository, a development task, and the current change before or after a Coding Agent works on it.
 
-V0.2 P1 adds deterministic task inspection to the existing governance capabilities:
+V0.2 P2 adds deterministic engineering planning on top of task inspection:
 
 - Task Inspection
+- Engineering Plan
 - Repository Audit
 - Architecture Contract
 - Change Policy
@@ -25,6 +26,7 @@ java -jar target/agentforge.jar audit /path/to/project
 java -jar target/agentforge.jar init /path/to/project
 java -jar target/agentforge.jar diff /path/to/project
 java -Xss16m -jar target/agentforge.jar inspect /path/to/project "development task"
+java -Xss16m -jar target/agentforge.jar plan /path/to/project "development task"
 ```
 
 ## Commands
@@ -43,6 +45,23 @@ When `PATH` is omitted, the current directory is inspected. The default limit is
 Inspection ranks recognized Java, Kotlin, JavaScript, JSX, TypeScript, TSX, and Vue sources. Task analysis separates core keywords, exact phrases, and weak derived n-grams. Ranking is intentionally limited to four explainable dimensions: structural identity, semantic task evidence, one-hop dependency evidence, and lightweight file responsibility. Architecture roles are contextual evidence only. Java also uses class/file/package matches, imports, and direct field or constructor dependencies.
 
 Each result separates three concepts: `Score` summarizes the amount of evidence, ranking identifies which files should be inspected first, and `Confidence` expresses how strongly the structural and task evidence support relevance. Confidence is not a ranking key, so calibration does not reorder results. The CLI shows core-keyword coverage and a short confidence reason, groups positive evidence by task, structure, dependency, and context, and hides internal weak n-grams.
+
+### `agentforge plan`
+
+Builds a deterministic, read-only engineering plan from the existing `inspect` report:
+
+```bash
+java -Xss16m -jar target/agentforge.jar plan "fix login 401"
+java -Xss16m -jar target/agentforge.jar plan /path/to/project "analyze backup alert synchronization"
+```
+
+When `PATH` is omitted, the current directory is used. Planning does not discover additional relevant files. It preserves inspect ordering while grouping known results into PRIMARY likely change targets, SECONDARY files to inspect before changing, and REFERENCE read-only context. These are planning recommendations rather than mandatory edits or policy restrictions.
+
+The report includes the deterministic task type and matching signal, plan confidence, Do Not Touch paths, an estimated change scope, pre-implementation risk, test recommendations, and acceptance criteria. A dirty working tree produces a warning but does not fail. A non-Git directory produces an unavailable baseline and still returns a plan. Missing policy files use built-in defaults; invalid policy or architecture YAML fails explicitly.
+
+`Plan Confidence` describes whether inspect supplied enough implementation evidence. LOW or REFERENCE evidence is never promoted through new business rules, and it is not treated as permission to modify a file. `Pre-Implementation Risk` describes risk visible before implementation and is separate from the current-change risk reported by `agentforge diff`. Dirty-tree risk is calibrated by the existing changed-file count, and overlap with PRIMARY or SECONDARY scope is computed from the existing Git report without rescanning source.
+
+Test guidance is derived only from repository build/test facts, task type, the existing plan scope, architecture roles, and inspect's related flow. It may recommend regression, scheduler, API, persistence, integration, or manual verification without attempting to infer method-level behavior.
 
 ### `agentforge audit`
 
@@ -90,7 +109,7 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.2 P1 has no LLM calls, Agent execution, or Codex integration. Its findings are deterministic, rule-based, and explainable.
+V0.2 P2 has no LLM calls, Agent execution, prompt generation, or Coding Agent adapter. Its inspection and planning findings are deterministic, rule-based, and explainable.
 
 ### Task Inspection
 
@@ -104,5 +123,4 @@ Dependency expansion is Java-only, field/constructor based, and limited to one h
 
 - Machine-readable report output.
 - Richer parser-backed dependency analysis.
-- Deterministic task plan generation from inspected context.
 - Prompt and coding-agent adapters after the governance core is stable.
