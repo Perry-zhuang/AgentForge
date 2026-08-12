@@ -4,10 +4,11 @@ AgentForge is a local AI Engineering control plane and repository governance CLI
 
 AgentForge does not write code. It analyzes the repository, a development task, and the current change before or after a Coding Agent works on it.
 
-V0.2 P2 adds deterministic engineering planning on top of task inspection:
+V0.2 P3 adds deterministic coding-agent prompt delivery on top of engineering planning:
 
 - Task Inspection
 - Engineering Plan
+- Engineering Prompt
 - Repository Audit
 - Architecture Contract
 - Change Policy
@@ -27,6 +28,7 @@ java -jar target/agentforge.jar init /path/to/project
 java -jar target/agentforge.jar diff /path/to/project
 java -Xss16m -jar target/agentforge.jar inspect /path/to/project "development task"
 java -Xss16m -jar target/agentforge.jar plan /path/to/project "development task"
+java -Xss16m -jar target/agentforge.jar prompt /path/to/project "development task"
 ```
 
 ## Commands
@@ -62,6 +64,22 @@ The report includes the deterministic task type and matching signal, plan confid
 `Plan Confidence` describes whether inspect supplied enough implementation evidence. LOW or REFERENCE evidence is never promoted through new business rules, and it is not treated as permission to modify a file. `Pre-Implementation Risk` describes risk visible before implementation and is separate from the current-change risk reported by `agentforge diff`. Dirty-tree risk is calibrated by the existing changed-file count, and overlap with PRIMARY or SECONDARY scope is computed from the existing Git report without rescanning source.
 
 Test guidance is derived only from repository build/test facts, task type, the existing plan scope, architecture roles, and inspect's related flow. It may recommend regression, scheduler, API, persistence, integration, or manual verification without attempting to infer method-level behavior.
+
+### `agentforge prompt`
+
+Builds a deterministic Engineering Prompt from the existing engineering plan:
+
+```bash
+java -Xss16m -jar target/agentforge.jar prompt "fix login 401"
+java -Xss16m -jar target/agentforge.jar prompt /path/to/project "analyze backup alert synchronization"
+java -Xss16m -jar target/agentforge.jar prompt /path/to/project "fix login 401" --output task-prompt.md
+```
+
+When `PATH` is omitted, the current directory is used. Prompt generation calls planning once and does not scan source, rank files, classify the task, calculate scope, or calculate risk independently. It converts only facts already carried by the immutable `EngineeringPlan` into instructions for a Coding Agent.
+
+The prompt keeps PRIMARY, SECONDARY, and REFERENCE semantics explicit, preserves existing working-tree changes, carries configured architecture and policy restrictions, and requires scope deviations to be reported. Analysis tasks are read-only by default. An unavailable architecture contract is clearly separated from lightweight observed flows.
+
+By default the prompt is written to standard output. `--output FILE` writes UTF-8 to an existing parent directory and refuses to overwrite an existing file. `--output FILE --force` permits replacement. A relative output path is resolved from the current working directory. Writing inside the analyzed repository emits a warning; only the explicitly selected output file is written.
 
 ### `agentforge audit`
 
@@ -109,7 +127,7 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.2 P2 has no LLM calls, Agent execution, prompt generation, or Coding Agent adapter. Its inspection and planning findings are deterministic, rule-based, and explainable.
+V0.2 P3 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, and prompt generation are deterministic, rule-based, and explainable. The prompt command packages existing engineering facts; it does not introduce a new source-analysis or inference layer.
 
 ### Task Inspection
 

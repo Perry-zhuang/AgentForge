@@ -5,12 +5,15 @@ import io.agentforge.application.DiffAuditService;
 import io.agentforge.application.InitService;
 import io.agentforge.application.InspectService;
 import io.agentforge.application.PlanService;
+import io.agentforge.application.PromptService;
 import io.agentforge.cli.AgentForgeCommand;
 import io.agentforge.cli.AuditCommand;
 import io.agentforge.cli.DiffCommand;
 import io.agentforge.cli.InitCommand;
 import io.agentforge.cli.InspectCommand;
 import io.agentforge.cli.PlanCommand;
+import io.agentforge.cli.PromptCommand;
+import io.agentforge.cli.PromptRenderer;
 import io.agentforge.cli.TextReportRenderer;
 import io.agentforge.config.ConfigLoader;
 import io.agentforge.git.GitChangeScanner;
@@ -26,6 +29,7 @@ import io.agentforge.planning.PlanEngine;
 import io.agentforge.planning.PlanRiskEngine;
 import io.agentforge.planning.PlanTestAdvisor;
 import io.agentforge.planning.TaskTypeClassifier;
+import io.agentforge.prompting.PromptEngine;
 import io.agentforge.recommendation.RecommendationEngine;
 import io.agentforge.scanner.ArchitectureScanner;
 import io.agentforge.scanner.ContextScanner;
@@ -56,19 +60,23 @@ final class CliTestHarness {
                 configLoader, new PolicyEngine(), new MinimalChangeEngine(), new RiskEngine());
         PlanService planService = new PlanService(inspectService, configLoader, changeScanner,
                 new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor()));
+        PromptService promptService = new PromptService(planService, new PromptEngine());
         TextReportRenderer renderer = new TextReportRenderer();
+        PromptRenderer promptRenderer = new PromptRenderer();
 
         AuditCommand audit = new AuditCommand(auditService, renderer);
         InitCommand init = new InitCommand(initService, renderer);
         DiffCommand diff = new DiffCommand(diffService, renderer);
         InspectCommand inspect = new InspectCommand(inspectService, renderer);
         PlanCommand plan = new PlanCommand(planService, renderer);
+        PromptCommand prompt = new PromptCommand(promptService, promptRenderer);
         Map<Class<?>, Object> components = Map.of(
                 AuditCommand.class, audit,
                 InitCommand.class, init,
                 DiffCommand.class, diff,
                 InspectCommand.class, inspect,
-                PlanCommand.class, plan);
+                PlanCommand.class, plan,
+                PromptCommand.class, prompt);
         CommandLine.IFactory factory = new CommandLine.IFactory() {
             @Override
             public <K> K create(Class<K> type) {

@@ -82,3 +82,31 @@ diff    = Evaluate current working-tree changes
 ```
 
 Planning is read-only: it does not initialize `.agentforge`, write caches in the target repository, edit governance files, change Git state, generate prompts, or execute a Coding Agent.
+
+## V0.2 P3 Engineering Prompt Flow
+
+```text
+PromptCommand
+    -> PromptService
+        -> PlanService.plan(...) exactly once
+            -> EngineeringPlan
+        -> PromptEngine
+            -> EngineeringPrompt
+    -> PromptRenderer
+```
+
+`PromptEngine` is a pure transformation boundary over `EngineeringPlan`. It has no repository scanner, inspect service, task classifier, scope engine, configuration loader, or risk engine dependency. It preserves the plan's task type, confidence, ordered scope, architecture and policy constraints, Git baseline and overlap, pre-implementation risk, verification guidance, and acceptance criteria. Instructions without a direct source in those facts are omitted.
+
+`EngineeringPrompt` is immutable and contains only prompt-facing facts and instructions. Scope entries deliberately omit inspect scores, confidence reasons, and match evidence. `PromptRenderer` owns the fixed Markdown section order and performs no planning or policy decisions.
+
+Prompt generation is read-only with respect to the target repository. The optional user-selected `--output` file is the only permitted write; existing files require `--force`, parent directories are never created, and output inside the target repository produces an explicit warning.
+
+The command boundaries are:
+
+```text
+audit   = Understand repository readiness
+inspect = Locate known relevant files
+plan    = Organize known facts into a safe implementation plan
+prompt  = Package the engineering plan as deterministic Coding Agent instructions
+diff    = Evaluate current working-tree changes
+```
