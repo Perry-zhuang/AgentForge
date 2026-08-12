@@ -1,0 +1,12 @@
+schema_version: 1
+architecture:
+  layers: [controller, service, repository, mapper]
+  rules:
+    controller:
+      allow_dependencies: [service]
+    service:
+      allow_dependencies: [repository, mapper]
+    repository:
+      allow_dependencies: []
+    mapper:
+      allow_dependencies: []
