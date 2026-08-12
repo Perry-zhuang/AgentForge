@@ -2,10 +2,11 @@
 
 AgentForge is a local AI Engineering control plane and repository governance CLI for coding-agent workflows.
 
-AgentForge does not write code. It analyzes the repository and the current change before or after a Coding Agent works on it.
+AgentForge does not write code. It analyzes the repository, a development task, and the current change before or after a Coding Agent works on it.
 
-V0.1.1 focuses on five deterministic governance capabilities:
+V0.2 P1 adds deterministic task inspection to the existing governance capabilities:
 
+- Task Inspection
 - Repository Audit
 - Architecture Contract
 - Change Policy
@@ -23,9 +24,23 @@ Coding agents work best when repository boundaries, architecture rules, and chan
 java -jar target/agentforge.jar audit /path/to/project
 java -jar target/agentforge.jar init /path/to/project
 java -jar target/agentforge.jar diff /path/to/project
+java -Xss16m -jar target/agentforge.jar inspect /path/to/project "development task"
 ```
 
 ## Commands
+
+### `agentforge inspect`
+
+Finds source files related to a natural-language development task without an LLM:
+
+```bash
+java -Xss16m -jar target/agentforge.jar inspect /path/to/project "analyze user login permissions"
+java -Xss16m -jar target/agentforge.jar inspect --limit 15 /path/to/project "backup alert sync"
+```
+
+When `PATH` is omitted, the current directory is inspected. The default limit is 10 and the valid range is 1–15. Results include explainable scores, build modules, source areas, and detected one-hop dependency flow.
+
+Inspection ranks recognized Java, Kotlin, JavaScript, JSX, TypeScript, TSX, and Vue sources. Task analysis separates core keywords, exact phrases, and weak derived n-grams. Core-token coverage and exact phrase evidence dominate ranking; architecture roles are contextual evidence only. Java also uses class/file/package matches, imports, direct field or constructor dependencies, and one-hop neighbors of strong relevance seeds.
 
 ### `agentforge audit`
 
@@ -73,10 +88,17 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.1.1 has no LLM calls, Agent execution, or Codex integration. Its findings are deterministic, rule-based, and explainable.
+V0.2 P1 has no LLM calls, Agent execution, or Codex integration. Its findings are deterministic, rule-based, and explainable.
+
+### Task Inspection
+
+V0.2 P1 inspection is lexical and structural, not semantic search. It does not translate between languages, infer synonyms, build method call graphs, or understand runtime behavior. Chinese input uses deterministic, dictionary-free core-token splitting plus weak derived n-grams. Core-token coverage is computed within one logical source line, with a bounded window for long lines, so unrelated declarations cannot be combined into artificial full coverage.
+
+Dependency expansion is Java-only, field/constructor based, limited to one hop, and starts only from exact, multi-core, full-coverage, or strong class/file/package seeds. Package concentration is a ranking hint rather than proof that every result belongs to the requested workflow. Large Java repositories affected by the current lightweight-regex stack limitation may still require `-Xss16m`.
 
 ## Roadmap
 
 - Machine-readable report output.
 - Richer parser-backed dependency analysis.
+- Deterministic task plan generation from inspected context.
 - Prompt and coding-agent adapters after the governance core is stable.

@@ -3,10 +3,12 @@ package io.agentforge;
 import io.agentforge.application.AuditService;
 import io.agentforge.application.DiffAuditService;
 import io.agentforge.application.InitService;
+import io.agentforge.application.InspectService;
 import io.agentforge.cli.AgentForgeCommand;
 import io.agentforge.cli.AuditCommand;
 import io.agentforge.cli.DiffCommand;
 import io.agentforge.cli.InitCommand;
+import io.agentforge.cli.InspectCommand;
 import io.agentforge.cli.TextReportRenderer;
 import io.agentforge.config.ConfigLoader;
 import io.agentforge.git.GitChangeScanner;
@@ -15,6 +17,8 @@ import io.agentforge.git.GitRepositoryInspector;
 import io.agentforge.policy.MinimalChangeEngine;
 import io.agentforge.policy.PolicyEngine;
 import io.agentforge.policy.ReadinessEngine;
+import io.agentforge.inspection.RelevantFileEngine;
+import io.agentforge.inspection.TaskAnalyzer;
 import io.agentforge.risk.RiskEngine;
 import io.agentforge.recommendation.RecommendationEngine;
 import io.agentforge.scanner.ArchitectureScanner;
@@ -38,6 +42,8 @@ final class CliTestHarness {
         ReadinessEngine readinessEngine = new ReadinessEngine();
         AuditService auditService = new AuditService(repositoryScanner, contextScanner, architectureScanner,
                 configLoader, readinessEngine, new RecommendationEngine(readinessEngine));
+        InspectService inspectService = new InspectService(repositoryScanner, contextScanner, architectureScanner,
+                configLoader, new TaskAnalyzer(), new RelevantFileEngine());
         InitService initService = new InitService();
         GitChangeScanner changeScanner = new GitChangeScanner(git, inspector);
         DiffAuditService diffService = new DiffAuditService(changeScanner, repositoryScanner, architectureScanner,
@@ -47,10 +53,12 @@ final class CliTestHarness {
         AuditCommand audit = new AuditCommand(auditService, renderer);
         InitCommand init = new InitCommand(initService, renderer);
         DiffCommand diff = new DiffCommand(diffService, renderer);
+        InspectCommand inspect = new InspectCommand(inspectService, renderer);
         Map<Class<?>, Object> components = Map.of(
                 AuditCommand.class, audit,
                 InitCommand.class, init,
-                DiffCommand.class, diff);
+                DiffCommand.class, diff,
+                InspectCommand.class, inspect);
         CommandLine.IFactory factory = new CommandLine.IFactory() {
             @Override
             public <K> K create(Class<K> type) {

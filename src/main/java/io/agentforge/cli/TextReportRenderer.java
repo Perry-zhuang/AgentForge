@@ -13,6 +13,7 @@ import io.agentforge.model.ProjectTechnology;
 import io.agentforge.model.Recommendation;
 import io.agentforge.model.RepositoryReport;
 import io.agentforge.model.ScoreBreakdown;
+import io.agentforge.model.TaskInspectionReport;
 import java.util.Collection;
 import java.util.Locale;
 import java.util.stream.Collectors;
@@ -20,6 +21,60 @@ import org.springframework.stereotype.Component;
 
 @Component
 public class TextReportRenderer {
+    public String inspect(TaskInspectionReport report) {
+        RepositoryReport repository = report.repositoryReport();
+        StringBuilder out = new StringBuilder();
+        out.append("╭─────────────────────────────────╮\n")
+                .append("│ AgentForge Task Inspection      │\n")
+                .append("╰─────────────────────────────────╯\n\n");
+        section(out, "Task");
+        out.append(report.request().task()).append('\n');
+        row(out, "Core Keywords", joinedOrNone(report.taskAnalysis().coreTokens()));
+        row(out, "Exact Phrases", joinedOrNone(report.taskAnalysis().exactPhrases()));
+        row(out, "Derived Keywords", joinedOrNone(report.taskAnalysis().derivedTokens()));
+        section(out, "Repository");
+        row(out, "Path", repository.repository().path());
+        technology(out, repository.technology());
+        section(out, "Relevant Files");
+        if (report.relevantFiles().isEmpty()) {
+            out.append("No high-confidence relevant files found.\n")
+                    .append("Suggestions:\n")
+                    .append("- use a more specific class, module, or business keyword\n");
+        } else {
+            int index = 1;
+            for (var file : report.relevantFiles()) {
+                out.append(index++).append(". [").append(file.level()).append("] ")
+                        .append(file.className().orElseGet(() -> fileName(file.path()))).append('\n');
+                row(out, "   Path", file.path());
+                row(out, "   Score", file.score());
+                row(out, "   Module", file.module());
+                out.append("   Evidence:\n");
+                file.evidence().forEach(evidence -> out.append("   - +").append(evidence.points()).append(' ')
+                        .append(evidence.detail()).append('\n'));
+                out.append('\n');
+            }
+        }
+        section(out, "Related Build Modules");
+        if (report.relevantModules().isEmpty()) out.append("None\n");
+        else report.relevantModules().forEach(module -> out.append("- ").append(module.path())
+                .append(" (score ").append(module.score()).append(", files ")
+                .append(module.relevantFiles().size()).append(")\n"));
+        section(out, "Related Packages / Source Areas");
+        if (report.relevantSourceAreas().isEmpty()) out.append("None\n");
+        else report.relevantSourceAreas().forEach(area -> out.append("- ").append(area.name())
+                .append(" (score ").append(area.score()).append(", files ")
+                .append(area.relevantFiles().size()).append(")\n"));
+        section(out, "Related Flow");
+        if (report.relatedFlow().isEmpty()) out.append("None detected\n");
+        else report.relatedFlow().forEach(edge -> out.append(simpleName(edge.from())).append(" -> ")
+                .append(simpleName(edge.to())).append('\n'));
+        if (!report.warnings().isEmpty()) {
+            section(out, "Warnings");
+            report.warnings().forEach(warning -> out.append("WARN ").append(warning).append('\n'));
+        }
+        return out.toString();
+    }
+
     public String audit(AuditReport audit) {
         RepositoryReport report = audit.repositoryReport();
         ContextReport context = report.context();
@@ -188,6 +243,10 @@ public class TextReportRenderer {
                 .sorted().collect(Collectors.joining(", "));
     }
 
+    private String joinedOrNone(Collection<String> values) {
+        return values.isEmpty() ? "None" : String.join(", ", values);
+    }
+
     private void section(StringBuilder out, String title) {
         out.append('\n').append(title).append('\n').append("----------------------------------\n");
     }
@@ -205,5 +264,15 @@ public class TextReportRenderer {
     }
     private void indented(StringBuilder out, String value, String indentation) {
         value.lines().forEach(line -> out.append(indentation).append(line).append('\n'));
+    }
+
+    private String fileName(String path) {
+        int slash = path.lastIndexOf('/');
+        return slash >= 0 ? path.substring(slash + 1) : path;
+    }
+
+    private String simpleName(String qualifiedName) {
+        int dot = qualifiedName.lastIndexOf('.');
+        return dot >= 0 ? qualifiedName.substring(dot + 1) : qualifiedName;
     }
 }

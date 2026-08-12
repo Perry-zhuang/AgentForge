@@ -7,6 +7,8 @@ import io.agentforge.model.DependencyEdge;
 import io.agentforge.model.DependencyGraph;
 import io.agentforge.model.JavaRole;
 import io.agentforge.model.JavaTypeInfo;
+import io.agentforge.model.FileType;
+import io.agentforge.model.SourceFileIndex;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.EnumMap;
@@ -29,13 +31,17 @@ public class ArchitectureScanner {
     private static final Pattern PARAMETER_TYPE = Pattern.compile("(?:^|,)\\s*(?:final\\s+)?(?:@[\\w.]+(?:\\([^)]*\\))?\\s+)*([A-Z][\\w.]*)\\s+\\w+");
 
     public ArchitectureReport scan(Path root, List<Path> repositoryFiles, Optional<ArchitectureContract> contract) {
+        return scanDetailed(root, repositoryFiles, contract).report();
+    }
+
+    public DetailedResult scanDetailed(Path root, List<Path> repositoryFiles, Optional<ArchitectureContract> contract) {
         List<String> warnings = new ArrayList<>();
         List<JavaSource> sources = new ArrayList<>();
         Map<String, JavaTypeInfo> nodes = new LinkedHashMap<>();
         Map<String, String> simpleToQualified = new HashMap<>();
         Map<JavaRole, Integer> roleCounts = new EnumMap<>(JavaRole.class);
 
-        for (Path file : repositoryFiles) {
+        for (Path file : repositoryFiles.stream().sorted().toList()) {
             if (!file.getFileName().toString().endsWith(".java")) continue;
             String content = ScanSupport.readText(root, file, warnings);
             if (content.isBlank()) continue;
@@ -48,12 +54,14 @@ public class ArchitectureScanner {
             nodes.put(qualifiedName, type);
             simpleToQualified.put(simpleName, qualifiedName);
             if (role != JavaRole.OTHER) roleCounts.merge(role, 1, Integer::sum);
-            sources.add(new JavaSource(type, analysisContent, imports(analysisContent)));
+            Map<String, String> imports = imports(analysisContent);
+            Set<String> dependencies = dependencyTypes(type.simpleName(), analysisContent);
+            sources.add(new JavaSource(type, content, analysisContent, imports, dependencies));
         }
 
         Set<DependencyEdge> edgeSet = new LinkedHashSet<>();
         for (JavaSource source : sources) {
-            Set<String> candidateTypes = dependencyTypes(source.type().simpleName(), source.content());
+            Set<String> candidateTypes = source.dependencyTypes();
             for (String candidate : candidateTypes) {
                 String simple = candidate.contains(".") ? candidate.substring(candidate.lastIndexOf('.') + 1) : candidate;
                 String qualified = source.imports().get(simple);
@@ -68,7 +76,9 @@ public class ArchitectureScanner {
             }
         }
 
-        List<DependencyEdge> edges = List.copyOf(edgeSet);
+        List<DependencyEdge> edges = edgeSet.stream()
+                .sorted(java.util.Comparator.comparing(DependencyEdge::from).thenComparing(DependencyEdge::to))
+                .toList();
         Map<String, Integer> relations = new LinkedHashMap<>();
         List<DependencyEdge> bypasses = new ArrayList<>();
         List<DependencyEdge> violations = new ArrayList<>();
@@ -82,8 +92,13 @@ public class ArchitectureScanner {
             }
             if (contract.isPresent() && violates(edge, contract.get())) violations.add(edge);
         }
-        return new ArchitectureReport(new DependencyGraph(nodes, edges), roleCounts, relations, bypasses,
+        ArchitectureReport report = new ArchitectureReport(new DependencyGraph(nodes, edges), roleCounts, relations, bypasses,
                 violations, contract.isPresent(), ArchitectureAnalysisMode.LIGHTWEIGHT, warnings);
+        List<SourceFileIndex> sourceIndex = sources.stream().map(source -> new SourceFileIndex(
+                source.type().path(), FileType.JAVA, source.type().qualifiedName(), source.type().simpleName(),
+                source.type().packageName(), source.type().role(), new LinkedHashSet<>(source.imports().values()),
+                source.dependencyTypes(), source.rawContent())).toList();
+        return new DetailedResult(report, sourceIndex);
     }
 
     private boolean violates(DependencyEdge edge, ArchitectureContract contract) {
@@ -145,5 +160,12 @@ public class ArchitectureScanner {
                 .replaceAll("(?m)//.*$", " ");
     }
 
-    private record JavaSource(JavaTypeInfo type, String content, Map<String, String> imports) {}
+    public record DetailedResult(ArchitectureReport report, List<SourceFileIndex> sourceIndex) {
+        public DetailedResult {
+            sourceIndex = List.copyOf(sourceIndex);
+        }
+    }
+
+    private record JavaSource(JavaTypeInfo type, String rawContent, String content,
+                              Map<String, String> imports, Set<String> dependencyTypes) {}
 }

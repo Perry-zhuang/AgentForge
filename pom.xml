@@ -13,7 +13,7 @@
 
     <groupId>io.agentforge</groupId>
     <artifactId>agentforge</artifactId>
-    <version>0.1.1-SNAPSHOT</version>
+    <version>0.2.0-SNAPSHOT</version>
     <name>AgentForge</name>
     <description>AI Engineering control plane and repository governance CLI</description>
 
