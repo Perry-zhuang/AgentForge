@@ -100,6 +100,7 @@ class RunRendererTest {
         when(result.repositoryRoot()).thenReturn(Path.of("/tmp/run-renderer"));
         when(result.task()).thenReturn("修复登录异常");
         when(result.taskType()).thenReturn(TaskType.BUGFIX);
+        when(result.plan()).thenReturn(PromptTestFixtures.plan(TaskType.BUGFIX));
         when(result.agent()).thenReturn(identity);
         when(result.agentExecutionResult()).thenReturn(process);
         when(result.executionChangeReport()).thenReturn(delta);

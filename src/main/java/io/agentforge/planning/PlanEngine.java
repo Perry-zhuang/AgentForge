@@ -20,6 +20,7 @@ import io.agentforge.model.RelevantFile;
 import io.agentforge.model.RepositoryInfo;
 import io.agentforge.model.TaskInspectionReport;
 import io.agentforge.model.TaskType;
+import io.agentforge.model.TaskClassification;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.LinkedHashSet;
@@ -36,33 +37,45 @@ public class PlanEngine {
     private final TaskTypeClassifier taskTypeClassifier;
     private final PlanRiskEngine riskEngine;
     private final PlanTestAdvisor testAdvisor;
+    private final RunPreflightService preflightService;
 
     public PlanEngine(TaskTypeClassifier taskTypeClassifier, PlanRiskEngine riskEngine,
-                      PlanTestAdvisor testAdvisor) {
+                      PlanTestAdvisor testAdvisor, RunPreflightService preflightService) {
         this.taskTypeClassifier = taskTypeClassifier;
         this.riskEngine = riskEngine;
         this.testAdvisor = testAdvisor;
+        this.preflightService = preflightService;
     }
 
     public EngineeringPlan create(TaskInspectionReport inspection, PolicyConfig policy, boolean defaultPolicyUsed,
                                   Optional<ArchitectureContract> contract,
                                   Optional<ChangeReport> currentChanges) {
-        TaskTypeClassifier.Result classification = taskTypeClassifier.classify(inspection.request().task());
+        return create(inspection, policy, defaultPolicyUsed, contract, currentChanges, null);
+    }
+
+    public EngineeringPlan create(TaskInspectionReport inspection, PolicyConfig policy, boolean defaultPolicyUsed,
+                                  Optional<ArchitectureContract> contract,
+                                  Optional<ChangeReport> currentChanges, TaskType taskTypeOverride) {
+        TaskClassification classification = taskTypeClassifier.classifyFacts(
+                inspection.request().task(), taskTypeOverride);
         ScopeResult scopeResult = scope(inspection);
         PlanConfidence confidence = confidence(inspection.relevantFiles());
         boolean reliableScope = !scopeResult.scope().primary().isEmpty();
         List<PlanConstraint> constraints = constraints(inspection, policy, contract);
         GitBaseline baseline = baseline(inspection, currentChanges);
         PlanScopeOverlap overlap = overlap(scopeResult.scope(), currentChanges);
-        EstimatedChangeScope estimate = estimate(scopeResult.scope(), reliableScope);
+        EstimatedChangeScope estimate = estimate(scopeResult.scope(), reliableScope, classification);
         PlanRisk risk = riskEngine.evaluate(inspection, policy, baseline, overlap,
-                scopeResult.primaryCandidateCount(), contract.isPresent());
+                scopeResult.primaryCandidateCount(), contract.isPresent(), classification);
         List<String> warnings = warnings(inspection, policy, defaultPolicyUsed, baseline, overlap, reliableScope);
-        return new EngineeringPlan(inspection.request().task(), classification.type(), classification.signal(),
-                confidence, inspection.repositoryReport(), baseline, scopeResult.scope(), overlap,
-                steps(classification.type(), baseline, contract.isPresent(), reliableScope), constraints, estimate,
+        String signal = classification.signals().isEmpty() ? "No deterministic task-type signal matched"
+                : classification.signals().get(0).name();
+        return new EngineeringPlan(inspection.request().task(), classification.effectiveType(), signal,
+                classification, preflightService.evaluate(classification), confidence,
+                inspection.repositoryReport(), baseline, scopeResult.scope(), overlap,
+                steps(classification.effectiveType(), baseline, contract.isPresent(), reliableScope), constraints, estimate,
                 risk, testAdvisor.advise(inspection.repositoryReport(), scopeResult.scope(), inspection.relatedFlow(),
-                        classification.type(), reliableScope,
+                        classification.effectiveType(), reliableScope,
                         policy.readiness().testability().minimumTestRatio()),
                 acceptanceCriteria(reliableScope), defaultPolicyUsed, reliableScope, warnings);
     }
@@ -201,7 +214,8 @@ public class PlanEngine {
         return new PlanScopeOverlap(changedRelevantFiles, overlappingPaths, primaryOverlap, secondaryOverlap);
     }
 
-    private EstimatedChangeScope estimate(PlanScope scope, boolean reliableScope) {
+    private EstimatedChangeScope estimate(PlanScope scope, boolean reliableScope,
+                                          TaskClassification classification) {
         if (!reliableScope) return new EstimatedChangeScope(0, 0, 0, false, false, false, false);
         List<RelevantFile> candidates = new ArrayList<>(scope.primary());
         candidates.addAll(scope.secondary());
@@ -211,7 +225,8 @@ public class PlanEngine {
         ChangeSignalClassifier.Signals signals = ChangeSignalClassifier.classify(
                 candidates.stream().map(RelevantFile::path).toList());
         return new EstimatedChangeScope(minimum, maximum, modules, signals.database(), signals.dependency(),
-                signals.security(), signals.config());
+                signals.security() || classification.securityImpact() != io.agentforge.model.SecurityImpact.NONE,
+                signals.config());
     }
 
     private List<PlanStep> steps(TaskType type, GitBaseline baseline, boolean contractConfigured,

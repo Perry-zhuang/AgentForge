@@ -26,7 +26,12 @@ class PlanCommandTest {
         assertThat(result.output()).contains(
                 "AgentForge Engineering Plan",
                 "Type                     ANALYSIS",
-                "Type Signal              分析",
+                "Type Signal              ANALYSIS",
+                "Type Confidence          HIGH",
+                "Mutation Mode            READ_ONLY",
+                "Security Impact          NONE",
+                "Classification Source    DETECTED",
+                "Plan Confidence          LOW",
                 "Working Tree             NOT_AVAILABLE",
                 "PRIMARY",
                 "HistoryAlertService.java",

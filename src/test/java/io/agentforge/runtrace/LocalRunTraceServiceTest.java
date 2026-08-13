@@ -75,6 +75,12 @@ class LocalRunTraceServiceTest {
 
         JsonNode json = new ObjectMapper().readTree(trace.archiveDirectory().resolve("run.json").toFile());
         assertThat(json.path("schemaVersion").asInt()).isOne();
+        assertThat(json.path("taskClassification").path("detectedType").asText()).isEqualTo("ANALYSIS");
+        assertThat(json.path("taskClassification").path("effectiveType").asText()).isEqualTo("ANALYSIS");
+        assertThat(json.path("taskClassification").path("typeConfidence").asText()).isEqualTo("HIGH");
+        assertThat(json.path("taskClassification").path("mutationMode").asText()).isEqualTo("READ_ONLY");
+        assertThat(json.path("taskClassification").path("securityImpact").asText()).isEqualTo("NONE");
+        assertThat(json.path("taskClassification").path("classificationSource").asText()).isEqualTo("DETECTED");
         assertThat(json.path("lifecycle").path("status").asText()).isEqualTo("COMPLETE");
         assertThat(json.path("task").path("text").asText()).isEqualTo(task);
         assertThat(json.path("task").path("sha256").asText()).isEqualTo(sha(task));
@@ -109,6 +115,29 @@ class LocalRunTraceServiceTest {
         assertThat(json.path("execution").path("status").asText()).isEqualTo("SUCCESS");
         assertThat(json.path("delta").path("files").asInt()).isOne();
         assertThat(Files.readString(trace.reportFile())).contains("AGENT RUN INCOMPLETE", "VERIFICATION");
+    }
+
+    @Test
+    void recordsDetectedAndEffectiveTypesForUserOverrideWithoutChangingSchema() throws Exception {
+        Path repository = Files.createDirectory(temp.resolve("override-repo")).toRealPath();
+        Fixture fixture = fixture(repository, null);
+        var detected = new io.agentforge.planning.TaskTypeClassifier()
+                .classifyFacts("把用户这块处理一下 password", TaskType.FEATURE);
+        when(fixture.plan.taskClassification()).thenReturn(detected);
+        when(fixture.plan.taskType()).thenReturn(TaskType.FEATURE);
+        AgentRunRequest request = new AgentRunRequest(repository, "把用户这块处理一下 password",
+                CodingAgentType.CODEX, Duration.ofSeconds(5), Map.of(), null, TaskType.FEATURE);
+
+        RunTraceReference trace = fixture.service.prepare(request, fixture.plan, "prompt", fixture.baseline,
+                fixture.identity);
+
+        JsonNode json = new ObjectMapper().readTree(trace.archiveDirectory().resolve("run.json").toFile());
+        assertThat(json.path("schemaVersion").asInt()).isOne();
+        assertThat(json.path("taskClassification").path("detectedType").asText()).isEqualTo("UNKNOWN");
+        assertThat(json.path("taskClassification").path("effectiveType").asText()).isEqualTo("FEATURE");
+        assertThat(json.path("taskClassification").path("classificationSource").asText())
+                .isEqualTo("USER_OVERRIDE");
+        assertThat(json.path("taskClassification").path("securityImpact").asText()).isEqualTo("HIGH");
     }
 
     @Test
@@ -161,6 +190,8 @@ class LocalRunTraceServiceTest {
         when(report.repository()).thenReturn(info);
         when(info.path()).thenReturn(repository);
         when(plan.taskType()).thenReturn(TaskType.ANALYSIS);
+        when(plan.taskClassification()).thenReturn(io.agentforge.model.TaskClassification.legacy(
+                TaskType.ANALYSIS, "ANALYSIS"));
         CodingAgentIdentity identity = new CodingAgentIdentity(CodingAgentType.CODEX, "codex", Set.of());
         RepositorySnapshot snapshot = new RepositorySnapshot(1, repository.toString(), "main", "abc123", List.of());
         EngineeringBoundarySnapshot boundary = mock(EngineeringBoundarySnapshot.class);
@@ -202,6 +233,7 @@ class LocalRunTraceServiceTest {
             when(result.repositoryRoot()).thenReturn(Path.of(baseline.repositorySnapshot().repositoryRoot()));
             when(result.task()).thenReturn(task);
             when(result.taskType()).thenReturn(TaskType.ANALYSIS);
+            when(result.plan()).thenReturn(plan);
             when(result.agent()).thenReturn(identity);
             when(result.agentExecutionResult()).thenReturn(execution);
             when(result.executionChangeReport()).thenReturn(delta);

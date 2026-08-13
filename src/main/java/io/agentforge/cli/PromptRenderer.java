@@ -17,6 +17,10 @@ public class PromptRenderer implements EngineeringPromptRenderer {
         heading(out, "Engineering Task");
         field(out, "Task", prompt.task());
         field(out, "Task Type", prompt.taskType());
+        field(out, "Task Type Confidence", prompt.taskClassification().typeConfidence());
+        field(out, "Mutation Mode", prompt.taskClassification().mutationMode());
+        field(out, "Security Impact", prompt.taskClassification().securityImpact());
+        field(out, "Classification Source", prompt.taskClassification().source());
         field(out, "Plan Confidence", prompt.planConfidence());
 
         heading(out, "Repository Context");

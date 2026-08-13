@@ -343,6 +343,16 @@ components. `CodingAgentType.parse` provides the single agent-name parsing bound
 root continues to map CODEX to `CodexAdapter` through `CodingAgentRegistry`; neither CLI nor orchestrator constructs a
 concrete adapter.
 
+### V0.3.2 deterministic classification and preflight
+
+Status: **FROZEN**
+
+`TaskTypeClassifier` is a local pure classifier over task text. It emits one immutable `TaskClassification` containing detected/effective TaskType, TaskType confidence, MutationMode, SecurityImpact, classification source, and ordered signals. English terms use word-boundary matching; Chinese uses explicit phrase matching. CRUD words remain weak implementation vocabulary rather than standalone engineering intent.
+
+`RunPreflightService` consumes only those classification facts. The Plan stores its result so diagnostic `plan` output and `run` use identical facts. Execution still creates exactly one Plan. `AgentExecutionService` checks the stored preflight immediately after that Plan and before Prompt, baseline, trace, adapter resolution, or process execution. Blocked preflight therefore cannot start Codex or imply that an agent ran. Prompt, frozen boundary, verification, and run trace consume the same pre-execution Plan.
+
+TaskType overrides enter through `AgentRunRequest` and `EngineeringPlanRequest`; classification records detected and effective values. SecurityImpact remains detected and cannot be overridden. Additive classification fields remain in run trace schema version 1 without changing existing evidence fields.
+
 P3 uses `--timeout-seconds` because no general duration CLI contract exists. The value is a positive whole number of
 seconds and defaults to 900. Environment overrides remain a programmatic P2 request capability; P3 exposes no
 environment or credential flags and passes an empty override map, preserving inherited process environment semantics.

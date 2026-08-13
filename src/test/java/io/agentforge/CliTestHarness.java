@@ -96,7 +96,8 @@ final class CliTestHarness {
         DiffAuditService diffService = new DiffAuditService(changeScanner, repositoryScanner, architectureScanner,
                 configLoader, policyEngine, new MinimalChangeEngine(), new RiskEngine());
         PlanService planService = new PlanService(inspectService, configLoader, changeScanner,
-                new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor()));
+                new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor(),
+                        new io.agentforge.planning.RunPreflightService()));
         PromptService promptService = new PromptService(planService, new PromptEngine());
         RepositoryStateCapture stateCapture = new RepositoryStateCapture(git, inspector);
         RepositorySnapshotStore snapshotStore = new RepositorySnapshotStore();

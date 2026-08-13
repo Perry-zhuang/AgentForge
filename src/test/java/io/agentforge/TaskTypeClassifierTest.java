@@ -2,7 +2,12 @@ package io.agentforge;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
+import io.agentforge.model.ClassificationSignal;
+import io.agentforge.model.MutationMode;
+import io.agentforge.model.SecurityImpact;
+import io.agentforge.model.TaskClassification;
 import io.agentforge.model.TaskType;
+import io.agentforge.model.TaskTypeConfidence;
 import io.agentforge.planning.TaskTypeClassifier;
 import org.junit.jupiter.api.Test;
 
@@ -10,29 +15,71 @@ class TaskTypeClassifierTest {
     private final TaskTypeClassifier classifier = new TaskTypeClassifier();
 
     @Test
-    void classifiesRequiredTaskExamples() {
-        assertType("修复登录401异常", TaskType.BUGFIX, "修复");
-        assertType("增加用户导出功能", TaskType.FEATURE, "增加");
-        assertType("接入云信达同步", TaskType.INTEGRATION, "接入");
-        assertType("分析历史告警流程", TaskType.ANALYSIS, "分析");
+    void classifiesChineseEnglishAndMixedTasks() {
+        assertType("分析登录流程", TaskType.ANALYSIS, MutationMode.READ_ONLY);
+        assertType("修复登录失败", TaskType.BUGFIX, MutationMode.SOURCE_WRITE);
+        assertType("新增用户接口", TaskType.FEATURE, MutationMode.SOURCE_WRITE);
+        assertType("接入 CMP 系统", TaskType.INTEGRATION, MutationMode.SOURCE_WRITE);
+        assertType("重构服务并保持行为不变", TaskType.REFACTOR, MutationMode.SOURCE_WRITE);
+        assertType("analyze login flow", TaskType.ANALYSIS, MutationMode.READ_ONLY);
+        assertType("fix the broken login", TaskType.BUGFIX, MutationMode.SOURCE_WRITE);
+        assertType("add a password endpoint", TaskType.FEATURE, MutationMode.SOURCE_WRITE);
+        assertType("integrate with CMP", TaskType.INTEGRATION, MutationMode.SOURCE_WRITE);
+        assertType("refactor auth without behavior change", TaskType.REFACTOR, MutationMode.SOURCE_WRITE);
+        assertType("分析 login flow, read-only", TaskType.ANALYSIS, MutationMode.READ_ONLY);
+        assertType("新增 batch endpoint", TaskType.FEATURE, MutationMode.SOURCE_WRITE);
+        assertType("修复 login error", TaskType.BUGFIX, MutationMode.SOURCE_WRITE);
     }
 
     @Test
-    void classifiesRefactorAndUnknown() {
-        assertType("重构订单服务", TaskType.REFACTOR, "重构");
-        assertThat(classifier.classify("整理订单说明").type()).isEqualTo(TaskType.UNKNOWN);
+    void supportsRequiredEnglishInflectionsWithoutNaiveSubstringMatches() {
+        assertType("adding an endpoint", TaskType.FEATURE, MutationMode.SOURCE_WRITE);
+        assertType("added an endpoint", TaskType.FEATURE, MutationMode.SOURCE_WRITE);
+        assertType("implementing a capability", TaskType.FEATURE, MutationMode.SOURCE_WRITE);
+        assertType("fixed the defect", TaskType.BUGFIX, MutationMode.SOURCE_WRITE);
+        assertType("refactoring the service", TaskType.REFACTOR, MutationMode.SOURCE_WRITE);
+        assertType("integrated with CMP", TaskType.INTEGRATION, MutationMode.SOURCE_WRITE);
+        assertType("analyzing the flow", TaskType.ANALYSIS, MutationMode.READ_ONLY);
+        assertThat(classifier.classifyFacts("address user metadata", null).effectiveType())
+                .isEqualTo(TaskType.UNKNOWN);
     }
 
     @Test
-    void usesFixedTypePrecedenceAndEarliestSignalWithinAType() {
-        assertType("分析并修复同步 error", TaskType.BUGFIX, "修复");
-        assertType("异常修复登录", TaskType.BUGFIX, "异常");
-        assertType("implement a sync adapter", TaskType.FEATURE, "implement");
+    void resolvesReadOnlyWriteAndMixedIntentConflictsDeterministically() {
+        assertType("分析如何修复问题，只分析不修改源码", TaskType.ANALYSIS, MutationMode.READ_ONLY);
+        assertType("分析并修复问题", TaskType.BUGFIX, MutationMode.SOURCE_WRITE);
+        assertType("重构并保持行为不变", TaskType.REFACTOR, MutationMode.SOURCE_WRITE);
+        assertType("接入系统并修复旧 bug", TaskType.UNKNOWN, MutationMode.SOURCE_WRITE);
+        assertType("把用户这块处理一下", TaskType.UNKNOWN, MutationMode.UNKNOWN);
+        assertType("analyze update password SQL, do not modify source", TaskType.ANALYSIS, MutationMode.READ_ONLY);
+        assertType("fix insert user failure", TaskType.BUGFIX, MutationMode.SOURCE_WRITE);
     }
 
-    private void assertType(String task, TaskType type, String signal) {
-        TaskTypeClassifier.Result result = classifier.classify(task);
-        assertThat(result.type()).isEqualTo(type);
-        assertThat(result.signal()).isEqualTo(signal);
+    @Test
+    void classifiesNaturalBaasPasswordFeatureAndSecurityEvidence() {
+        TaskClassification result = classifier.classifyFacts(
+                "把非admin跟superadmin的用户都更改密码跟盐值，通过controller输入，支持单个用户、多个用户修改密码", null);
+        assertThat(result.effectiveType()).isEqualTo(TaskType.FEATURE);
+        assertThat(result.typeConfidence()).isIn(TaskTypeConfidence.MEDIUM, TaskTypeConfidence.HIGH);
+        assertThat(result.mutationMode()).isEqualTo(MutationMode.SOURCE_WRITE);
+        assertThat(result.securityImpact()).isEqualTo(SecurityImpact.HIGH);
+        assertThat(result.signals()).contains(ClassificationSignal.API_CHANGE, ClassificationSignal.PASSWORD,
+                ClassificationSignal.SALT, ClassificationSignal.PRIVILEGED_ACCOUNT,
+                ClassificationSignal.BATCH_MUTATION);
+    }
+
+    @Test
+    void securityIsSemanticAndAdminAloneIsNotHigh() {
+        assertThat(classifier.classifyFacts("password reset", null).securityImpact()).isEqualTo(SecurityImpact.HIGH);
+        assertThat(classifier.classifyFacts("修改密码和盐值", null).securityImpact()).isEqualTo(SecurityImpact.HIGH);
+        assertThat(classifier.classifyFacts("change token authentication", null).securityImpact()).isEqualTo(SecurityImpact.HIGH);
+        assertThat(classifier.classifyFacts("新增显示名称功能", null).securityImpact()).isEqualTo(SecurityImpact.NONE);
+        assertThat(classifier.classifyFacts("新增 AdminController 显示名称", null).securityImpact()).isEqualTo(SecurityImpact.NONE);
+    }
+
+    private void assertType(String task, TaskType type, MutationMode mode) {
+        TaskClassification result = classifier.classifyFacts(task, null);
+        assertThat(result.effectiveType()).as(task).isEqualTo(type);
+        assertThat(result.mutationMode()).as(task).isEqualTo(mode);
     }
 }

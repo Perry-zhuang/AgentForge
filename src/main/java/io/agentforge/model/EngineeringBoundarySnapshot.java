@@ -6,11 +6,12 @@ import java.util.List;
 import java.util.Optional;
 
 /** Immutable, verification-relevant engineering boundary captured before execution. */
-@JsonPropertyOrder({"task", "taskType", "primaryPaths", "secondaryPaths", "referencePaths",
+@JsonPropertyOrder({"task", "taskType", "mutationMode", "primaryPaths", "secondaryPaths", "referencePaths",
         "changePolicy", "defaultPolicyUsed", "architectureAnalysisMode", "architectureContract"})
 public record EngineeringBoundarySnapshot(
         String task,
         TaskType taskType,
+        MutationMode mutationMode,
         List<String> primaryPaths,
         List<String> secondaryPaths,
         List<String> referencePaths,
@@ -19,11 +20,26 @@ public record EngineeringBoundarySnapshot(
         ArchitectureAnalysisMode architectureAnalysisMode,
         ArchitectureContract architectureContract
 ) {
+    public EngineeringBoundarySnapshot(String task, TaskType taskType, List<String> primaryPaths,
+                                       List<String> secondaryPaths, List<String> referencePaths,
+                                       PolicyConfig.ChangePolicy changePolicy, boolean defaultPolicyUsed,
+                                       ArchitectureAnalysisMode architectureAnalysisMode,
+                                       ArchitectureContract architectureContract) {
+        this(task, taskType, taskType == TaskType.ANALYSIS ? MutationMode.READ_ONLY
+                        : taskType == TaskType.UNKNOWN ? MutationMode.UNKNOWN : MutationMode.SOURCE_WRITE,
+                primaryPaths, secondaryPaths, referencePaths, changePolicy, defaultPolicyUsed,
+                architectureAnalysisMode, architectureContract);
+    }
+
     public EngineeringBoundarySnapshot {
         if (task == null || task.isBlank()) throw new IllegalArgumentException("Boundary task is required");
         if (taskType == null || changePolicy == null || architectureAnalysisMode == null) {
             throw new IllegalArgumentException("Engineering boundary facts are required");
         }
+        mutationMode = mutationMode == null
+                ? taskType == TaskType.ANALYSIS ? MutationMode.READ_ONLY
+                : taskType == TaskType.UNKNOWN ? MutationMode.UNKNOWN : MutationMode.SOURCE_WRITE
+                : mutationMode;
         task = task.strip();
         primaryPaths = normalizedPaths(primaryPaths, "PRIMARY");
         secondaryPaths = normalizedPaths(secondaryPaths, "SECONDARY");
@@ -40,6 +56,7 @@ public record EngineeringBoundarySnapshot(
             throw new IllegalArgumentException("Plan, policy, and architecture facts are required");
         }
         return new EngineeringBoundarySnapshot(plan.task(), plan.taskType(),
+                plan.taskClassification().mutationMode(),
                 paths(plan.scope().primary()), paths(plan.scope().secondary()), paths(plan.scope().reference()),
                 changePolicy, defaultPolicyUsed, plan.repository().architecture().analysisMode(),
                 contract.orElse(null));

@@ -38,7 +38,22 @@ public class TextReportRenderer {
         out.append(plan.task()).append("\n\n");
         row(out, "Type", plan.taskType());
         row(out, "Type Signal", plan.taskTypeSignal());
+        row(out, "Type Confidence", plan.taskClassification().typeConfidence());
+        row(out, "Mutation Mode", plan.taskClassification().mutationMode());
+        row(out, "Security Impact", plan.taskClassification().securityImpact());
+        row(out, "Classification Source", plan.taskClassification().source());
+        if (plan.taskClassification().source() == io.agentforge.model.ClassificationSource.USER_OVERRIDE) {
+            row(out, "Detected Type", plan.taskClassification().detectedType());
+        }
         row(out, "Plan Confidence", plan.confidence());
+
+        out.append("\nSignals:\n\n");
+        if (plan.taskClassification().signals().isEmpty()) out.append("- None\n");
+        else plan.taskClassification().signals().forEach(signal -> out.append("- ").append(signal).append('\n'));
+        out.append("\nRun Eligibility:\n\n");
+        row(out, "Status", plan.runPreflight().status());
+        row(out, "Reason", plan.runPreflight().reason());
+        if (!plan.runPreflight().warning().isBlank()) row(out, "Warning", plan.runPreflight().warning());
 
         planSection(out, "Repository");
         row(out, "Path", plan.repository().repository().path());

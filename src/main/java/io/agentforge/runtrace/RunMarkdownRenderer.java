@@ -13,6 +13,11 @@ public class RunMarkdownRenderer {
                 .append(result.repositoryRoot()).append("`\n\nAgent: `").append(result.agent().type()).append("`\n\n");
         out.append("## Question\n\n").append(result.task()).append("\n\n");
         out.append("## Engineering Boundary\n\nTask Type: `").append(result.taskType()).append("`\n\n")
+                .append("Task Type Confidence: `").append(result.plan().taskClassification().typeConfidence())
+                .append("`  \nMutation Mode: `").append(result.plan().taskClassification().mutationMode())
+                .append("`  \nSecurity Impact: `").append(result.plan().taskClassification().securityImpact())
+                .append("`  \nClassification Source: `").append(result.plan().taskClassification().source())
+                .append("`\n\n")
                 .append("PRIMARY: ").append(result.verificationReport().executionBoundary().primaryPaths().size())
                 .append("  \nSECONDARY: ").append(result.verificationReport().executionBoundary().secondaryPaths().size())
                 .append("  \nREFERENCE: ").append(result.verificationReport().executionBoundary().referencePaths().size())

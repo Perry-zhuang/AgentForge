@@ -6,6 +6,9 @@ import io.agentforge.model.PlanRisk;
 import io.agentforge.model.PlanScopeOverlap;
 import io.agentforge.model.PolicyConfig;
 import io.agentforge.model.TaskInspectionReport;
+import io.agentforge.model.TaskClassification;
+import io.agentforge.model.SecurityImpact;
+import io.agentforge.model.ClassificationSignal;
 import io.agentforge.policy.PolicyPathMatcher;
 import java.util.ArrayList;
 import java.util.List;
@@ -16,6 +19,13 @@ public class PlanRiskEngine {
     public PlanRisk evaluate(TaskInspectionReport inspection, PolicyConfig policy,
                              GitBaseline baseline, PlanScopeOverlap overlap, int primaryCandidateCount,
                              boolean architectureContractConfigured) {
+        return evaluate(inspection, policy, baseline, overlap, primaryCandidateCount,
+                architectureContractConfigured, null);
+    }
+
+    public PlanRisk evaluate(TaskInspectionReport inspection, PolicyConfig policy,
+                             GitBaseline baseline, PlanScopeOverlap overlap, int primaryCandidateCount,
+                             boolean architectureContractConfigured, TaskClassification classification) {
         List<PlanRisk.Factor> factors = new ArrayList<>();
         List<String> relevantPaths = inspection.relevantFiles().stream().map(file -> file.path()).toList();
         boolean denied = relevantPaths.stream()
@@ -27,6 +37,14 @@ public class PlanRiskEngine {
         addIf(factors, denied, 20, "Denied policy path appears in the inspect results");
         addIf(factors, protectedPath, 20, "Protected policy path appears in the inspect results");
         addIf(factors, signals.security(), 20, "Security path appears in the inspect results");
+        addIf(factors, classification != null && classification.securityImpact() == SecurityImpact.HIGH,
+                25, "High security-impact task");
+        addIf(factors, classification != null
+                        && classification.signals().contains(ClassificationSignal.BATCH_MUTATION)
+                        && (classification.signals().contains(ClassificationSignal.PASSWORD)
+                        || classification.signals().contains(ClassificationSignal.SALT)
+                        || classification.signals().contains(ClassificationSignal.SECURITY_CREDENTIAL)),
+                10, "Batch credential mutation");
         addIf(factors, signals.database(), 15, "Database path appears in the inspect results");
         addIf(factors, signals.dependency(), 15, "Dependency descriptor appears in the inspect results");
         addIf(factors, primaryCandidateCount > 5, 10, "More than 5 files qualify as PRIMARY candidates");

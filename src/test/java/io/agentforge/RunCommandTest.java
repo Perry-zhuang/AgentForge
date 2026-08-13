@@ -11,11 +11,14 @@ import static org.mockito.Mockito.when;
 import io.agentforge.agent.CodingAgentType;
 import io.agentforge.application.AgentExecutionService;
 import io.agentforge.application.AgentRunException;
+import io.agentforge.application.RunPreflightException;
 import io.agentforge.cli.RunCommand;
 import io.agentforge.cli.RunRenderer;
 import io.agentforge.model.AgentRunRequest;
 import io.agentforge.model.AgentRunResult;
 import io.agentforge.model.AgentRunStatus;
+import io.agentforge.model.RunPreflight;
+import io.agentforge.model.TaskType;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.nio.file.Path;
@@ -34,7 +37,8 @@ class RunCommandTest {
         Fixture fixture = fixture(AgentRunStatus.PASS);
 
         Result result = fixture.execute(repository.toString(), "修复登录异常", "--agent", "CoDeX",
-                "--timeout-seconds", "37", "--output", repository.getParent().resolve("report.md").toString());
+                "--timeout-seconds", "37", "--task-type", "bugfix",
+                "--output", repository.getParent().resolve("report.md").toString());
 
         assertThat(result.exitCode()).isZero();
         assertThat(result.output()).isEqualTo("rendered run\n");
@@ -48,6 +52,7 @@ class RunCommandTest {
         assertThat(request.getValue().timeout()).isEqualTo(Duration.ofSeconds(37));
         assertThat(request.getValue().environmentOverrides()).isEmpty();
         assertThat(request.getValue().outputFile()).isEqualTo(repository.getParent().resolve("report.md").toAbsolutePath());
+        assertThat(request.getValue().taskTypeOverride()).isEqualTo(TaskType.BUGFIX);
     }
 
     @Test
@@ -121,6 +126,34 @@ class RunCommandTest {
         assertThat(result.exitCode()).isEqualTo(2);
         assertThat(result.output()).contains("ERROR Agent run failed during REPOSITORY_VALIDATION");
         verify(renderer, never()).render(any());
+    }
+
+    @Test
+    void rendersBlockedPreflightAndReturnsTwoWithoutAgentFailureSemantics() {
+        AgentExecutionService service = mock(AgentExecutionService.class);
+        RunRenderer renderer = mock(RunRenderer.class);
+        var plan = PromptTestFixtures.plan(TaskType.UNKNOWN);
+        RunPreflight preflight = new RunPreflight(RunPreflight.Status.BLOCKED,
+                RunPreflight.Reason.TASK_TYPE_UNRESOLVED, "");
+        RunPreflightException failure = new RunPreflightException(plan, preflight);
+        when(service.execute(any())).thenThrow(failure);
+        when(renderer.renderBlocked(failure)).thenReturn("RUN BLOCKED\nAgent Execution NOT STARTED\n");
+
+        Result result = new Fixture(service, renderer, null).execute("task", "--agent", "codex");
+
+        assertThat(result.exitCode()).isEqualTo(2);
+        assertThat(result.output()).contains("RUN BLOCKED", "NOT STARTED");
+        verify(renderer).renderBlocked(failure);
+        verify(renderer, never()).render(any());
+    }
+
+    @Test
+    void rejectsUnknownTaskTypeOverrideBeforeOrchestration() {
+        Fixture fixture = fixture(AgentRunStatus.PASS);
+        Result result = fixture.execute("task", "--agent", "codex", "--task-type", "unknown");
+        assertThat(result.exitCode()).isEqualTo(2);
+        assertThat(result.output()).contains("--task-type does not allow unknown");
+        verify(fixture.service(), never()).execute(any());
     }
 
     private Fixture fixture(AgentRunStatus status) {

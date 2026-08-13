@@ -37,6 +37,7 @@ public class PlanService {
         Optional<ArchitectureContract> contract = configLoader.loadArchitecture(root);
         Optional<ChangeReport> changes = inspection.repositoryReport().repository().gitRepository()
                 ? Optional.of(gitChangeScanner.scan(root)) : Optional.empty();
-        return planEngine.create(inspection, policy.config(), policy.defaultUsed(), contract, changes);
+        return planEngine.create(inspection, policy.config(), policy.defaultUsed(), contract, changes,
+                request.taskTypeOverride());
     }
 }

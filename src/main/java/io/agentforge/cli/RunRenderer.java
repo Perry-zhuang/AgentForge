@@ -7,6 +7,8 @@ import io.agentforge.model.VerificationFinding;
 import java.util.Locale;
 import org.springframework.stereotype.Component;
 import io.agentforge.application.AgentRunException;
+import io.agentforge.application.RunPreflightException;
+import io.agentforge.model.TaskClassification;
 
 /** Deterministic formatting of aggregate run facts and the agent's delivered stdout. */
 @Component
@@ -20,6 +22,14 @@ public class RunRenderer {
         row(out, "Task", result.task());
         row(out, "Task Type", result.taskType());
         row(out, "Agent", result.agent().type());
+
+        classification(out, result.plan().taskClassification());
+        if (result.plan().runPreflight().status() == io.agentforge.model.RunPreflight.Status.ALLOWED_WITH_WARNING) {
+            section(out, "Preflight");
+            row(out, "Status", result.plan().runPreflight().status());
+            row(out, "Reason", result.plan().runPreflight().reason());
+            row(out, "Warning", result.plan().runPreflight().warning());
+        }
 
         section(out, "Engineering Boundary");
         row(out, "PRIMARY", result.verificationReport().executionBoundary().primaryPaths().size());
@@ -107,6 +117,31 @@ public class RunRenderer {
         section(out, "Decision");
         out.append("AGENT RUN INCOMPLETE\n");
         return out.toString();
+    }
+
+    public String renderBlocked(RunPreflightException failure) {
+        StringBuilder out = new StringBuilder("AgentForge Run\n");
+        classification(out, failure.plan().taskClassification());
+        section(out, "Preflight");
+        row(out, "Status", failure.preflight().status());
+        row(out, "Reason", failure.preflight().reason());
+        section(out, "Agent Execution");
+        out.append("NOT STARTED\n");
+        section(out, "Decision");
+        out.append("RUN BLOCKED\n\nNo coding agent was started.\nNo repository changes were made.\n");
+        return out.toString();
+    }
+
+    private void classification(StringBuilder out, TaskClassification classification) {
+        section(out, "Task Classification");
+        row(out, "Type", classification.effectiveType());
+        row(out, "Type Confidence", classification.typeConfidence());
+        row(out, "Mutation Mode", classification.mutationMode());
+        row(out, "Security Impact", classification.securityImpact());
+        row(out, "Classification Source", classification.source());
+        if (classification.source() == io.agentforge.model.ClassificationSource.USER_OVERRIDE) {
+            row(out, "Detected Type", classification.detectedType());
+        }
     }
 
     private void renderChange(StringBuilder out, ExecutionChangeReport.ExecutionChange change) {

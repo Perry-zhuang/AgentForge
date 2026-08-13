@@ -15,6 +15,8 @@ import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
 import io.agentforge.application.AgentRunException;
+import io.agentforge.application.RunPreflightException;
+import io.agentforge.model.TaskType;
 
 /** Thin CLI entry point over the frozen execution-orchestration lifecycle. */
 @Component
@@ -45,6 +47,10 @@ public class RunCommand implements Callable<Integer> {
             description = "Export the archived human-readable report to a new .md file.")
     private Path output;
 
+    @Option(names = "--task-type", paramLabel = "TYPE",
+            description = "Override task type: analysis, bugfix, feature, integration, or refactor.")
+    private String taskType;
+
     public RunCommand(AgentExecutionService executionService, RunRenderer renderer) {
         this.executionService = executionService;
         this.renderer = renderer;
@@ -59,11 +65,15 @@ public class RunCommand implements Callable<Integer> {
             Path path = arguments.length == 1 ? Path.of(".") : Path.of(arguments[0]);
             String task = arguments.length == 1 ? arguments[0] : arguments[1];
             AgentRunRequest request = new AgentRunRequest(path, task, CodingAgentType.parse(agent),
-                    Duration.ofSeconds(timeoutSeconds), Map.of(), output);
+                    Duration.ofSeconds(timeoutSeconds), Map.of(), output, TaskType.parseOverride(taskType));
             AgentRunResult result = executionService.execute(request);
             spec.commandLine().getOut().print(renderer.render(result));
             spec.commandLine().getOut().flush();
             return successful(result) ? 0 : 1;
+        } catch (RunPreflightException exception) {
+            spec.commandLine().getOut().print(renderer.renderBlocked(exception));
+            spec.commandLine().getOut().flush();
+            return 2;
         } catch (AgentRunException exception) {
             if (exception.runTrace().isPresent()) {
                 spec.commandLine().getOut().print(renderer.renderIncomplete(exception));

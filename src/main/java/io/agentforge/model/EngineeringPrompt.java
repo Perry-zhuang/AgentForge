@@ -5,6 +5,7 @@ import java.util.List;
 public record EngineeringPrompt(
         String task,
         TaskType taskType,
+        TaskClassification taskClassification,
         PlanConfidence planConfidence,
         RepositoryReport repository,
         GitBaseline gitBaseline,
@@ -27,10 +28,13 @@ public record EngineeringPrompt(
 ) {
     public EngineeringPrompt {
         if (task == null || task.isBlank()) throw new IllegalArgumentException("Engineering prompt task is required");
-        if (taskType == null || planConfidence == null || repository == null || gitBaseline == null
+        if (taskType == null || taskClassification == null || planConfidence == null || repository == null || gitBaseline == null
                 || objective == null || objective.isBlank() || primaryScope == null || secondaryScope == null
                 || referenceScope == null || preImplementationRisk == null) {
             throw new IllegalArgumentException("Engineering prompt fields are required");
+        }
+        if (taskType != taskClassification.effectiveType()) {
+            throw new IllegalArgumentException("Prompt task type must equal effective classification type");
         }
         architectureInstructions = List.copyOf(architectureInstructions);
         policyInstructions = List.copyOf(policyInstructions);

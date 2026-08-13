@@ -48,7 +48,7 @@ import org.junit.jupiter.api.io.TempDir;
 
 class PlanEngineTest {
     private final PlanEngine engine = new PlanEngine(
-            new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor());
+            new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor(), new io.agentforge.planning.RunPreflightService());
 
     @Test
     void createsStableFlowAwareScopeWithoutDiscoveringNewFiles(@TempDir Path root) {
@@ -138,6 +138,29 @@ class PlanEngineTest {
         var plan = create(inspection, root, Optional.empty());
 
         assertThat(plan.confidence()).isEqualTo(PlanConfidence.HIGH);
+    }
+
+    @Test
+    void integratesNaturalPasswordFeatureSecurityChangeAndHighRisk(@TempDir Path root) {
+        List<RelevantFile> files = List.of(
+                file("AdminController", RelevanceLevel.HIGH, ".", false),
+                file("AdminService", RelevanceLevel.HIGH, ".", false));
+        TaskInspectionReport base = report(root, files, List.of(), true, true, false, 2, 1);
+        String task = "把非admin跟superadmin的用户都更改密码跟盐值，通过controller输入，支持单个用户、多个用户修改密码";
+        TaskInspectionReport inspection = new TaskInspectionReport(
+                new TaskInspectionRequest(root, task, 15), base.repositoryReport(), base.taskAnalysis(),
+                base.relevantFiles(), base.relevantModules(), base.relevantSourceAreas(), base.relatedFlow(),
+                base.warnings());
+
+        var plan = create(inspection, root, Optional.empty());
+
+        assertThat(plan.taskType()).isEqualTo(io.agentforge.model.TaskType.FEATURE);
+        assertThat(plan.taskClassification().mutationMode()).isEqualTo(io.agentforge.model.MutationMode.SOURCE_WRITE);
+        assertThat(plan.taskClassification().securityImpact()).isEqualTo(io.agentforge.model.SecurityImpact.HIGH);
+        assertThat(plan.estimatedChangeScope().securityChange()).isTrue();
+        assertThat(plan.preImplementationRisk().level()).isEqualTo(PlanRisk.Level.HIGH);
+        assertThat(plan.preImplementationRisk().factors()).extracting(PlanRisk.Factor::reason)
+                .contains("High security-impact task", "Batch credential mutation");
     }
 
     @Test

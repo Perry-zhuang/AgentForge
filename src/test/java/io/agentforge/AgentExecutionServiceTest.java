@@ -45,6 +45,14 @@ import io.agentforge.model.VerificationFinding;
 import io.agentforge.model.VerificationReport;
 import io.agentforge.model.VerificationStatus;
 import io.agentforge.model.ViolationSeverity;
+import io.agentforge.model.TaskClassification;
+import io.agentforge.model.TaskTypeConfidence;
+import io.agentforge.model.MutationMode;
+import io.agentforge.model.SecurityImpact;
+import io.agentforge.model.ClassificationSource;
+import io.agentforge.model.ClassificationSignal;
+import io.agentforge.model.RunPreflight;
+import io.agentforge.application.RunPreflightException;
 import io.agentforge.prompting.EngineeringPromptRenderer;
 import io.agentforge.prompting.PromptEngine;
 import java.io.IOException;
@@ -155,6 +163,29 @@ class AgentExecutionServiceTest {
                         exception -> assertThat(exception.phase()).isEqualTo(AgentRunException.Phase.BASELINE_CAPTURE));
 
         verifyNoInteractions(fixture.registry, fixture.adapter, fixture.checkService);
+    }
+
+    @Test
+    void blockedPreflightStopsBeforePromptBaselineTraceAndAdapter() {
+        Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
+        TaskClassification classification = new TaskClassification(TaskType.UNKNOWN, TaskType.UNKNOWN,
+                TaskTypeConfidence.LOW, MutationMode.SOURCE_WRITE, SecurityImpact.HIGH,
+                ClassificationSource.DETECTED,
+                List.of(ClassificationSignal.SOURCE_WRITE, ClassificationSignal.PASSWORD), false);
+        EngineeringPlan blocked = withClassification(fixture.plan, classification,
+                new RunPreflight(RunPreflight.Status.BLOCKED,
+                        RunPreflight.Reason.UNKNOWN_HIGH_SECURITY, ""));
+        when(fixture.planService.plan(any())).thenReturn(blocked);
+
+        assertThatThrownBy(() -> fixture.service.execute(request()))
+                .isInstanceOfSatisfying(RunPreflightException.class, exception -> {
+                    assertThat(exception.plan()).isSameAs(blocked);
+                    assertThat(exception.preflight().reason()).isEqualTo(
+                            RunPreflight.Reason.UNKNOWN_HIGH_SECURITY);
+                });
+
+        verifyNoInteractions(fixture.promptService, fixture.renderer, fixture.baselineService,
+                fixture.registry, fixture.adapter, fixture.checkService, fixture.runTraceService);
     }
 
     @Test
@@ -289,6 +320,15 @@ class AgentExecutionServiceTest {
                 report, source.gitBaseline(), source.scope(), source.scopeOverlap(), source.steps(),
                 source.constraints(), source.estimatedChangeScope(), source.preImplementationRisk(), source.tests(),
                 source.acceptanceCriteria(), source.defaultPolicyUsed(), source.reliableScope(), source.warnings());
+    }
+
+    private EngineeringPlan withClassification(EngineeringPlan source, TaskClassification classification,
+                                               RunPreflight preflight) {
+        return new EngineeringPlan(source.task(), classification.effectiveType(), "SOURCE_WRITE", classification,
+                preflight, source.confidence(), source.repository(), source.gitBaseline(), source.scope(),
+                source.scopeOverlap(), source.steps(), source.constraints(), source.estimatedChangeScope(),
+                source.preImplementationRisk(), source.tests(), source.acceptanceCriteria(),
+                source.defaultPolicyUsed(), source.reliableScope(), source.warnings());
     }
 
     private Path canonicalRepository() {

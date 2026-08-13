@@ -24,6 +24,7 @@ public class PromptEngine {
         return new EngineeringPrompt(
                 plan.task(),
                 plan.taskType(),
+                plan.taskClassification(),
                 plan.confidence(),
                 plan.repository(),
                 plan.gitBaseline(),
@@ -207,6 +208,11 @@ public class PromptEngine {
 
     private List<String> changeInstructions(EngineeringPlan plan) {
         List<String> result = new ArrayList<>();
+        if (plan.taskClassification().mutationMode() == io.agentforge.model.MutationMode.READ_ONLY) {
+            result.add("Do not modify source code or any repository file.");
+        } else {
+            result.add("Source changes remain limited to the frozen Engineering Boundary and task evidence.");
+        }
         for (PlanStep step : plan.steps()) {
             if (plan.taskType() == TaskType.ANALYSIS
                     && (step.description().equals("Execute the generated Test Plan.")

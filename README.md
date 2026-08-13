@@ -75,6 +75,36 @@ The report includes the deterministic task type and matching signal, plan confid
 
 `Plan Confidence` describes whether inspect supplied enough implementation evidence. LOW or REFERENCE evidence is never promoted through new business rules, and it is not treated as permission to modify a file. `Pre-Implementation Risk` describes risk visible before implementation and is separate from the current-change risk reported by `agentforge diff`. Dirty-tree risk is calibrated by the existing changed-file count, and overlap with PRIMARY or SECONDARY scope is computed from the existing Git report without rescanning source.
 
+## Task Classification
+
+V0.3.2 Classification & Preflight — **FROZEN**
+
+AgentForge classifies tasks locally and deterministically in Chinese, English, or mixed language. `TaskType` explains why work is requested: `ANALYSIS`, `BUGFIX`, `FEATURE`, `INTEGRATION`, `REFACTOR`, or `UNKNOWN`. `MutationMode` is a separate safety fact: `READ_ONLY`, `SOURCE_WRITE`, or `UNKNOWN`. Classification confidence is separate from Plan Confidence, which describes repository-scope evidence.
+
+Before `agentforge run` starts an agent, preflight allows compatible known classifications and blocks unresolved write intent. `UNKNOWN + READ_ONLY` may continue with a warning; unresolved write, unknown mutation, and unknown high-security tasks are blocked before adapter invocation. Password, salt, token, authentication, authorization, credential, and related task semantics contribute to `SecurityImpact` and risk.
+
+Natural wording is supported; special AgentForge phrases are not mandatory:
+
+- `分析用户同步，只分析，不修改源码`
+- `修复用户重复创建问题`
+- `新增密码重置接口`
+- `接入 CMP 用户同步`
+- `重构密码生成逻辑，保持行为不变`
+- `Analyze user sync, do not modify source.`
+- `Fix duplicate user creation.`
+- `Add a password reset endpoint.`
+- `Integrate CMP user sync.`
+- `Refactor password generation without behavior change.`
+
+An unresolved task can use an explicit override:
+
+```bash
+agentforge run /path/to/repo "implement the requested endpoint" \
+  --task-type feature --agent codex
+```
+
+Allowed values are `analysis`, `bugfix`, `feature`, `integration`, and `refactor`; `unknown` is rejected. The trace preserves detected and effective types with `classificationSource=USER_OVERRIDE`. Overrides do not remove security facts, and write overrides conflicting with explicit read-only wording are blocked.
+
 Test guidance is derived only from repository build/test facts, task type, the existing plan scope, architecture roles, and inspect's related flow. It may recommend regression, scheduler, API, persistence, integration, or manual verification without attempting to infer method-level behavior.
 
 ### `agentforge prompt`

@@ -147,14 +147,14 @@ public class CheckEngine {
 
     private void addTaskTypeFindings(BoundaryFacts boundary, VerificationChangeSet changeSet,
                                      List<VerificationFinding> findings) {
-        if (boundary.taskType() != TaskType.ANALYSIS) return;
+        if (boundary.mutationMode() != io.agentforge.model.MutationMode.READ_ONLY) return;
         for (VerificationChange file : changeSet.changes()) {
             if (!file.contentChanged()) continue;
             for (String path : logicalPaths(file)) {
                 if (!fileType(path).source()) continue;
                 findings.add(new VerificationFinding(VerificationFinding.Category.TASK_TYPE,
                         ViolationSeverity.ERROR, "ANALYSIS_SOURCE_MODIFICATION", path,
-                        "ANALYSIS tasks must not modify source code by default."));
+                        "READ_ONLY tasks must not modify source code."));
             }
         }
     }
@@ -210,6 +210,7 @@ public class CheckEngine {
     private record BoundaryFacts(
             java.nio.file.Path repositoryPath,
             TaskType taskType,
+            io.agentforge.model.MutationMode mutationMode,
             Set<String> primary,
             Set<String> secondary,
             Set<String> reference,
@@ -217,12 +218,14 @@ public class CheckEngine {
     ) {
         private static BoundaryFacts from(EngineeringPlan plan) {
             return new BoundaryFacts(plan.repository().repository().path(), plan.taskType(),
+                    plan.taskClassification().mutationMode(),
                     pathsOf(plan.scope().primary()), pathsOf(plan.scope().secondary()),
                     pathsOf(plan.scope().reference()), plan.repository().architecture().contractConfigured());
         }
 
         private static BoundaryFacts from(EngineeringBoundarySnapshot boundary) {
-            return new BoundaryFacts(null, boundary.taskType(), new LinkedHashSet<>(boundary.primaryPaths()),
+            return new BoundaryFacts(null, boundary.taskType(), boundary.mutationMode(),
+                    new LinkedHashSet<>(boundary.primaryPaths()),
                     new LinkedHashSet<>(boundary.secondaryPaths()), new LinkedHashSet<>(boundary.referencePaths()),
                     boundary.contractConfigured());
         }

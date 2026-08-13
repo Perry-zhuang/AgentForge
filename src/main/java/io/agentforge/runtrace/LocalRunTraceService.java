@@ -147,6 +147,15 @@ public class LocalRunTraceService implements RunTraceService {
                 "branch", context.baseline.repositorySnapshot().branch(), "head", context.baseline.repositorySnapshot().head()));
         root.put("task", ordered("text", context.request.task(), "sha256", sha(context.request.task()),
                 "type", context.plan.taskType().name()));
+        var classification = context.plan.taskClassification();
+        root.put("taskClassification", ordered(
+                "detectedType", classification.detectedType().name(),
+                "effectiveType", classification.effectiveType().name(),
+                "typeConfidence", classification.typeConfidence().name(),
+                "mutationMode", classification.mutationMode().name(),
+                "securityImpact", classification.securityImpact().name(),
+                "classificationSource", classification.source().name(),
+                "signals", classification.signals().stream().map(Enum::name).toList()));
         root.put("agent", ordered("type", context.agent.type().name(), "id", context.agent.id()));
         root.put("prompt", ordered("file", "prompt.md", "sha256", sha(context.renderedPrompt)));
         root.put("execution", execution == null ? null : ordered("status", execution.status().name(),

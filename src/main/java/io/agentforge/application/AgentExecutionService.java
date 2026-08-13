@@ -14,6 +14,7 @@ import io.agentforge.model.EngineeringPrompt;
 import io.agentforge.model.ExecutionBaseline;
 import io.agentforge.model.ExecutionChangeReport;
 import io.agentforge.model.VerificationReport;
+import io.agentforge.model.RunPreflight;
 import io.agentforge.prompting.EngineeringPromptRenderer;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -56,8 +57,11 @@ public class AgentExecutionService {
         Path requestedRoot = phase(AgentRunException.Phase.REPOSITORY_VALIDATION,
                 () -> canonicalDirectory(request.repositoryRoot()));
         EngineeringPlan plan = phase(AgentRunException.Phase.PLAN,
-                () -> planService.plan(new EngineeringPlanRequest(requestedRoot, request.task())));
+                () -> planService.plan(new EngineeringPlanRequest(requestedRoot, request.task(),
+                        request.taskTypeOverride())));
         Path repositoryRoot = plan.repository().repository().path();
+        RunPreflight preflight = plan.runPreflight();
+        if (!preflight.allowed()) throw new RunPreflightException(plan, preflight);
         EngineeringPrompt prompt = phase(AgentRunException.Phase.PROMPT,
                 () -> promptService.fromPlan(plan));
         String renderedPrompt = phase(AgentRunException.Phase.PROMPT,

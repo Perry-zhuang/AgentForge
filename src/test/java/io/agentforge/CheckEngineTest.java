@@ -109,6 +109,27 @@ class CheckEngineTest {
     }
 
     @Test
+    void unknownReadOnlyBoundaryStillRejectsSourceModification() {
+        EngineeringPlan factsPlan = PromptTestFixtures.plan(TaskType.BUGFIX);
+        EngineeringBoundarySnapshot boundary = new EngineeringBoundarySnapshot(
+                "看看用户这块，只读", TaskType.UNKNOWN, io.agentforge.model.MutationMode.READ_ONLY,
+                factsPlan.scope().primary().stream().map(file -> file.path()).toList(),
+                factsPlan.scope().secondary().stream().map(file -> file.path()).toList(),
+                factsPlan.scope().reference().stream().map(file -> file.path()).toList(),
+                new PolicyConfig.ChangePolicy(20, List.of(), List.of()), true,
+                ArchitectureAnalysisMode.LIGHTWEIGHT, null);
+
+        var report = engine.verify(boundary, executionFacts(factsPlan,
+                List.of(new ExecutionChangeReport.ExecutionChange(
+                        ExecutionChangeReport.ChangeType.MODIFIED,
+                        "src/main/java/demo/PrimaryService.java", null, true, true))));
+
+        assertThat(report.taskTypeStatus()).isEqualTo(VerificationStatus.FAIL);
+        assertThat(report.findings()).extracting(VerificationFinding::code)
+                .contains("ANALYSIS_SOURCE_MODIFICATION");
+    }
+
+    @Test
     void preservesEveryUnderlyingPolicyViolation() {
         EngineeringPlan plan = PromptTestFixtures.plan(TaskType.BUGFIX);
         PolicyReport policy = new PolicyReport(List.of(

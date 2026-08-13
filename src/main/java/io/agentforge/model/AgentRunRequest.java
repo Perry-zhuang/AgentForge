@@ -13,11 +13,17 @@ public record AgentRunRequest(
         CodingAgentType agentType,
         Duration timeout,
         Map<String, String> environmentOverrides,
-        Path outputFile
+        Path outputFile,
+        TaskType taskTypeOverride
 ) {
     public AgentRunRequest(Path repositoryRoot, String task, CodingAgentType agentType, Duration timeout,
                            Map<String, String> environmentOverrides) {
-        this(repositoryRoot, task, agentType, timeout, environmentOverrides, null);
+        this(repositoryRoot, task, agentType, timeout, environmentOverrides, null, null);
+    }
+
+    public AgentRunRequest(Path repositoryRoot, String task, CodingAgentType agentType, Duration timeout,
+                           Map<String, String> environmentOverrides, Path outputFile) {
+        this(repositoryRoot, task, agentType, timeout, environmentOverrides, outputFile, null);
     }
 
     public AgentRunRequest {
@@ -35,5 +41,8 @@ public record AgentRunRequest(
         environment.putAll(environmentOverrides);
         environmentOverrides = Collections.unmodifiableMap(environment);
         outputFile = outputFile == null ? null : outputFile.toAbsolutePath().normalize();
+        if (taskTypeOverride == TaskType.UNKNOWN) {
+            throw new IllegalArgumentException("UNKNOWN cannot be used as a task-type override");
+        }
     }
 }

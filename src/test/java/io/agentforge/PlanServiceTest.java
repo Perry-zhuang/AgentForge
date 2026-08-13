@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.ArgumentMatchers.same;
+import static org.mockito.ArgumentMatchers.isNull;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -46,7 +47,7 @@ class PlanServiceTest {
         when(configLoader.loadPolicy(root)).thenReturn(policy);
         when(configLoader.loadArchitecture(root)).thenReturn(Optional.empty());
         when(planEngine.create(same(inspection), same(policy.config()), eq(true), eq(Optional.empty()),
-                eq(Optional.empty()))).thenReturn(expected);
+                eq(Optional.empty()), isNull())).thenReturn(expected);
         PlanService service = new PlanService(inspectService, configLoader, gitChangeScanner, planEngine);
 
         EngineeringPlan actual = service.plan(new EngineeringPlanRequest(root, "分析历史告警流程"));
@@ -59,6 +60,6 @@ class PlanServiceTest {
         assertThat(request.getValue().limit()).isEqualTo(10);
         verify(gitChangeScanner, never()).scan(any());
         verify(planEngine).create(same(inspection), same(policy.config()), eq(true), eq(Optional.empty()),
-                eq(Optional.empty()));
+                eq(Optional.empty()), isNull());
     }
 }

@@ -219,7 +219,8 @@ class AgentExecutionServiceIntegrationTest {
                 configLoader, new TaskAnalyzer(), new RelevantFileEngine());
         GitChangeScanner changeScanner = new GitChangeScanner(git, inspector);
         PlanService planService = new PlanService(inspectService, configLoader, changeScanner,
-                new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor()));
+                new PlanEngine(new TaskTypeClassifier(), new PlanRiskEngine(), new PlanTestAdvisor(),
+                        new io.agentforge.planning.RunPreflightService()));
         PromptService promptService = new PromptService(planService, new PromptEngine());
         RepositoryStateCapture stateCapture = new RepositoryStateCapture(git, inspector);
         RepositorySnapshotStore snapshotStore = new RepositorySnapshotStore();
