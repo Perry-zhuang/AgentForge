@@ -17,6 +17,9 @@ V0.2 P4 P2 adds deterministic execution-window boundary verification on top of r
 - Minimal Change
 - Risk
 
+V0.3 P0 adds the internal Coding Agent Adapter contract and a deterministic external-process driver. There is
+deliberately no `agentforge run` command yet, and no real Codex process is invoked by AgentForge in P0.
+
 ## Why AgentForge
 
 Coding agents work best when repository boundaries, architecture rules, and change policies are explicit. AgentForge scans those signals and provides deterministic, explainable readiness and change-risk reports.
@@ -152,6 +155,12 @@ Audits current Git changes for policy violations, architecture findings in chang
 
 The CLI delegates to application services, which coordinate scanners and pure policy/risk engines over immutable domain reports. See [the architecture overview](docs/architecture/overview.md).
 
+The V0.3 adapter boundary is narrower than the control plane. The control plane computes and freezes repository
+facts, Engineering Boundary, rendered prompt, baseline, execution delta, and verification decisions. An adapter
+receives only agent identity, canonical repository root, the already rendered prompt, timeout, and explicit
+environment overrides. It drives one external process and reports stdout, stderr, process exit code, timeout,
+interruption, and start-failure facts. Adapter process success is never equivalent to `CHECK EXECUTION PASS`.
+
 ## Known Limitations
 
 ### Architecture Analysis
@@ -172,7 +181,11 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.2 P4 P2 has no LLM calls, Agent execution, or Coding Agent adapter. Inspection, planning, prompt generation, boundary verification, snapshot capture, execution-delta comparison, and execution check are deterministic, local, and explainable. Execution Check verifies boundary compliance; it does not decide whether code is correct or whether a bug is fixed.
+V0.3 P0 defines a Coding Agent adapter contract and tests it only with a fake adapter and local Java child process.
+It does not invoke a real Coding Agent or expose execution through the CLI. Inspection, planning, prompt generation,
+boundary verification, snapshot capture, execution-delta comparison, and execution check remain deterministic,
+local, and explainable. Execution Check verifies boundary compliance; it does not decide whether code is correct or
+whether a bug is fixed.
 
 ### Task Inspection
 

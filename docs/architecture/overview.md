@@ -189,3 +189,45 @@ diff    = Evaluate current working-tree changes and policy risk
 check   = Verify current working-tree or attributed execution changes against a task-specific Engineering Boundary
 baseline = Capture repository state and report a deterministic execution-window delta
 ```
+
+## V0.3 P0 Coding Agent Adapter Contract
+
+```text
+AgentForge Control Plane
+    -> compute and freeze Engineering Boundary
+    -> render Engineering Prompt
+    -> capture task-aware baseline
+    -> AgentExecutionRequest
+        -> CodingAgentAdapter
+            -> external Coding Agent process
+            -> AgentExecutionResult
+    -> compare execution delta
+    -> check against the frozen boundary
+```
+
+The Adapter is an external-process driver, not a reasoning or governance layer. Its immutable request contains only
+agent identity/capabilities, the canonical target repository root, an already rendered prompt, an execution timeout,
+and explicit environment overrides. It does not receive an Engineering Plan, inspection report, Engineering Boundary,
+repository snapshot, execution delta, policy report, architecture report, or verification report. Prompt generation
+and all Engineering Boundary decisions stay in the control plane.
+
+The stdin process implementation delivers the rendered prompt as the exact UTF-8 input string without adding,
+removing, or recomputing instructions. The child process runs in the canonical request repository root. Its environment
+is inherited from the AgentForge process, and explicit request overrides win for matching names. The Adapter does not
+inject credentials, create prompt files, write repository files, or run Git lifecycle commands.
+
+stdout and stderr are drained independently and continuously while stdin is delivered on a third I/O worker, so large
+simultaneous output cannot block process completion on full pipe buffers. Normal completion captures both streams in
+full. A request timeout or calling-thread interruption terminates and reaps the direct child process and returns the
+output captured before termination. P0 intentionally does not implement descendant process-tree management; an agent
+that creates independent descendants is a later lifecycle concern.
+
+`AgentExecutionResult` contains process facts only: agent identity, process exit code when available, stdout, stderr,
+timeout, interruption, lifecycle status, and transport/start failure detail. Exit code zero means only that the external
+process completed successfully. It does not mean scope, policy, architecture, task type, business behavior, or
+verification passed. Likewise, a non-zero process exit is not represented as an Engineering Boundary violation.
+
+The registry is an explicit in-process `CodingAgentType -> CodingAgentAdapter` mapping. P0 defines only `CODEX` as an
+identity type and does not implement network discovery, SPI loading, a runtime plugin ecosystem, a real Codex CLI
+adapter, an execution orchestrator, or `agentforge run`. Future orchestration must freeze the Engineering Boundary and
+capture the baseline before `execute`, then compute execution delta and invoke Check only after `execute` completes.
