@@ -297,6 +297,45 @@ retains the completed process result, and a Check exception additionally retains
 
 P2 uses no temporary baseline file, so there is no prompt or baseline artifact inside the target repository and no
 cleanup lifecycle. It adds explicit local Spring wiring for the deterministic process executor, `CodexAdapter`, and
-registry, but still exposes no `agentforge run` command. It does not add rollback, Git add/commit/stash/reset/restore,
+registry; P2 itself exposed no `agentforge run` command. It does not add rollback, Git add/commit/stash/reset/restore,
 multi-agent execution, parallel execution, retries, resume, streaming UI, Claude, Gemini, plugin discovery, or business
 correctness decisions.
+
+## V0.3 P3 Run CLI
+
+```text
+Picocli RunCommand
+    -> parse [PATH] TASK, --agent, --timeout-seconds
+    -> AgentRunRequest
+    -> AgentExecutionService.execute(...) exactly once
+    -> AgentRunResult
+    -> RunRenderer
+    -> aggregate-status exit code
+```
+
+`RunCommand` is deliberately thin. Its only application dependency is `AgentExecutionService`; it does not import or
+invoke Plan, Inspect, Prompt, baseline, Check, policy, architecture, Git, process, registry, or concrete Adapter
+components. `CodingAgentType.parse` provides the single agent-name parsing boundary. The production Spring composition
+root continues to map CODEX to `CodexAdapter` through `CodingAgentRegistry`; neither CLI nor orchestrator constructs a
+concrete adapter.
+
+P3 uses `--timeout-seconds` because no general duration CLI contract exists. The value is a positive whole number of
+seconds and defaults to 900. Environment overrides remain a programmatic P2 request capability; P3 exposes no
+environment or credential flags and passes an empty override map, preserving inherited process environment semantics.
+
+`RunRenderer` consumes only `AgentRunResult` and immutable nested facts. It renders repository/task/agent identity,
+frozen boundary counts, process status and exit code, stdout/stderr presence, attributed changes, verification statuses
+and findings, and the existing aggregate decision. It reads no repository, Git state, configuration, or external
+process. Full prompts and raw stdout/stderr are omitted from the default report. Consequently report structure is
+deterministic, while the external agent streams retained in `AgentExecutionResult` remain nondeterministic facts.
+
+CLI exit codes are a projection of existing aggregate semantics: PASS and WARNING return 0; verification failure,
+agent failure, timeout, interruption, and start failure return 1; Picocli invocation errors and orchestration
+infrastructure failures return 2. The CLI does not reconstruct the aggregate decision. Process SUCCESS plus Check FAIL
+is rendered as `AGENT RUN VERIFICATION FAILED`; a failed or timed-out agent still displays its execution delta and
+independent verification findings.
+
+P3 adds no real Codex end-to-end acceptance test. Automated root-command tests use the real P2 orchestrator with a
+deterministic fake adapter over temporary Git repositories. Model selection, sandbox/approval ownership, login and API
+keys, sessions, resume, retry, rollback, auto-commit, parallel execution, additional agents, and business-correctness
+decisions remain outside this phase.

@@ -1,6 +1,7 @@
 package io.agentforge;
 
 import io.agentforge.application.AuditService;
+import io.agentforge.application.AgentExecutionService;
 import io.agentforge.application.BaselineService;
 import io.agentforge.application.CheckService;
 import io.agentforge.application.DiffAuditService;
@@ -21,7 +22,16 @@ import io.agentforge.cli.InspectCommand;
 import io.agentforge.cli.PlanCommand;
 import io.agentforge.cli.PromptCommand;
 import io.agentforge.cli.PromptRenderer;
+import io.agentforge.cli.RunCommand;
+import io.agentforge.cli.RunRenderer;
 import io.agentforge.cli.TextReportRenderer;
+import io.agentforge.agent.AgentExecutionResult;
+import io.agentforge.agent.AgentExecutionStatus;
+import io.agentforge.agent.CodingAgentAdapter;
+import io.agentforge.agent.CodingAgentCapability;
+import io.agentforge.agent.CodingAgentIdentity;
+import io.agentforge.agent.CodingAgentRegistry;
+import io.agentforge.agent.CodingAgentType;
 import io.agentforge.config.ConfigLoader;
 import io.agentforge.baseline.BaselineComparator;
 import io.agentforge.baseline.RepositorySnapshotStore;
@@ -49,12 +59,18 @@ import io.agentforge.verification.ExecutionArchitectureAttributor;
 import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Map;
+import java.util.List;
+import java.util.Set;
 import picocli.CommandLine;
 
 final class CliTestHarness {
     private CliTestHarness() {}
 
     static Result execute(String... args) {
+        return executeWithAdapter(new NoOpCodingAgentAdapter(), args);
+    }
+
+    static Result executeWithAdapter(CodingAgentAdapter adapter, String... args) {
         GitClient git = new GitClient();
         GitRepositoryInspector inspector = new GitRepositoryInspector(git);
         RepositoryScanner repositoryScanner = new RepositoryScanner(inspector);
@@ -83,10 +99,14 @@ final class CliTestHarness {
         CheckService checkService = new CheckService(planService, diffService, executionBaselineService,
                 repositoryScanner, architectureScanner, policyEngine,
                 new ExecutionArchitectureAttributor(), new CheckEngine());
+        AgentExecutionService agentExecutionService = new AgentExecutionService(planService, promptService,
+                new PromptRenderer(), executionBaselineService, new CodingAgentRegistry(List.of(adapter)),
+                checkService);
         TextReportRenderer renderer = new TextReportRenderer();
         PromptRenderer promptRenderer = new PromptRenderer();
         CheckRenderer checkRenderer = new CheckRenderer();
         BaselineRenderer baselineRenderer = new BaselineRenderer();
+        RunRenderer runRenderer = new RunRenderer();
 
         AuditCommand audit = new AuditCommand(auditService, renderer);
         InitCommand init = new InitCommand(initService, renderer);
@@ -96,6 +116,7 @@ final class CliTestHarness {
         PromptCommand prompt = new PromptCommand(promptService, promptRenderer);
         CheckCommand check = new CheckCommand(checkService, checkRenderer);
         BaselineCommand baseline = new BaselineCommand(baselineService, executionBaselineService, baselineRenderer);
+        RunCommand run = new RunCommand(agentExecutionService, runRenderer);
         Map<Class<?>, Object> components = Map.of(
                 AuditCommand.class, audit,
                 InitCommand.class, init,
@@ -103,6 +124,7 @@ final class CliTestHarness {
                 InspectCommand.class, inspect,
                 PlanCommand.class, plan,
                 PromptCommand.class, prompt,
+                RunCommand.class, run,
                 CheckCommand.class, check,
                 BaselineCommand.class, baseline);
         CommandLine.IFactory factory = new CommandLine.IFactory() {
@@ -120,6 +142,22 @@ final class CliTestHarness {
         commandLine.setErr(new PrintWriter(output));
         int exit = commandLine.execute(args);
         return new Result(exit, output.toString());
+    }
+
+    private static final class NoOpCodingAgentAdapter implements CodingAgentAdapter {
+        private static final CodingAgentIdentity IDENTITY = new CodingAgentIdentity(CodingAgentType.CODEX,
+                "fake-codex", Set.of(CodingAgentCapability.NON_INTERACTIVE));
+
+        @Override
+        public CodingAgentIdentity identity() {
+            return IDENTITY;
+        }
+
+        @Override
+        public AgentExecutionResult execute(io.agentforge.agent.AgentExecutionRequest request) {
+            return new AgentExecutionResult(IDENTITY, 0, "", "", false, false,
+                    AgentExecutionStatus.SUCCESS, "");
+        }
     }
 
     record Result(int exitCode, String output) {}

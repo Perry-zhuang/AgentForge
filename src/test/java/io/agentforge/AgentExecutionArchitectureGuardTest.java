@@ -51,9 +51,8 @@ class AgentExecutionArchitectureGuardTest {
     }
 
     @Test
-    void cliStillHasNoRunCommand() throws IOException {
-        String command = Files.readString(Path.of("src/main/java/io/agentforge/cli/AgentForgeCommand.java"));
-        assertThat(command).doesNotContain("RunCommand.class", "name = \"run\"");
-        assertThat(Files.exists(Path.of("src/main/java/io/agentforge/cli/RunCommand.java"))).isFalse();
+    void orchestratorRemainsIndependentFromTheLaterRunCli() throws IOException {
+        String service = Files.readString(SERVICE);
+        assertThat(service).doesNotContain("RunCommand", "RunRenderer", "io.agentforge.cli");
     }
 }

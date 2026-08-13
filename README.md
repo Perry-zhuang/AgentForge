@@ -17,9 +17,9 @@ V0.2 P4 P2 adds deterministic execution-window boundary verification on top of r
 - Minimal Change
 - Risk
 
-V0.3 P2 adds an internal, sequential Execution Orchestrator over the Codex CLI adapter. It freezes one plan, prompt,
-and task-aware baseline before agent execution, then always computes the execution delta and frozen-boundary Check
-after the adapter returns. There is deliberately no `agentforge run` command yet.
+V0.3 P3 exposes the internal, sequential Execution Orchestrator through a thin `agentforge run` command. It freezes
+one plan, prompt, and task-aware baseline before agent execution, then always computes the execution delta and
+frozen-boundary Check after the adapter returns.
 
 ## Why AgentForge
 
@@ -35,6 +35,7 @@ java -jar target/agentforge.jar diff /path/to/project
 java -Xss16m -jar target/agentforge.jar inspect /path/to/project "development task"
 java -Xss16m -jar target/agentforge.jar plan /path/to/project "development task"
 java -Xss16m -jar target/agentforge.jar prompt /path/to/project "development task"
+java -Xss16m -jar target/agentforge.jar run /path/to/project "development task" --agent codex
 java -Xss16m -jar target/agentforge.jar check /path/to/project "development task"
 java -jar target/agentforge.jar baseline capture /path/to/project --output /tmp/agentforge-baseline.json
 java -jar target/agentforge.jar baseline compare /path/to/project --baseline /tmp/agentforge-baseline.json
@@ -110,6 +111,44 @@ Without `--baseline`, the P4 P0 baseline remains `CURRENT_WORKING_TREE` with its
 Execution policy evaluation reuses the existing max-files, denied-path, and protected-path rules over execution files only. A rename counts once for max-files while both old and new paths are checked. Git-state-only activity participates in scope and path policy, but does not count as ANALYSIS source-content modification. Architecture failures are evidence-safe: without architecture snapshots, a current violation is attributed to execution only when its source file was added during the execution window; existing-file changes are reported with an attribution limitation instead of being mislabeled.
 
 Both modes are read-only. PASS and WARNING return exit code 0, FAIL returns 1, and command, configuration, baseline, schema, repository-identity, or capture errors return 2.
+
+### `agentforge run`
+
+Executes one registered Coding Agent inside the deterministic AgentForge control-plane lifecycle:
+
+```bash
+java -Xss16m -jar target/agentforge.jar run /path/to/project "fix login failure" --agent codex
+java -Xss16m -jar target/agentforge.jar run /path/to/project "analyze login flow" \
+  --agent codex --timeout-seconds 900
+```
+
+The command accepts a quoted task, an optional preceding repository path, required `--agent codex`, and an optional
+positive whole-second timeout whose default is 900 seconds. It does not expose model, prompt-file, sandbox, approval,
+credential, policy override, rollback, commit, resume, or parallel-execution options.
+
+`run` is a control-plane lifecycle entry point, not a Codex passthrough. The CLI creates one `AgentRunRequest`, calls
+the existing Execution Orchestrator once, and formats the resulting process, execution-delta, and frozen-boundary
+verification facts. It never plans, renders a prompt, captures a baseline, invokes an adapter, or runs Check itself.
+
+The report structure and ordering are deterministic. It displays whether stdout and stderr were captured but does not
+print the full Engineering Prompt or raw agent streams by default. The external agent's actual output remains
+nondeterministic and is retained in `AgentExecutionResult` for programmatic consumers.
+
+Typical decisions are:
+
+```text
+AGENT RUN PASS
+AGENT RUN WARNING
+AGENT RUN VERIFICATION FAILED
+AGENT RUN AGENT FAILED
+AGENT RUN TIMED OUT
+AGENT RUN START FAILED
+```
+
+PASS and WARNING return exit code 0. Verification failure, agent failure, timeout, interruption, and start failure
+return 1. Invalid arguments, repository/configuration errors, and orchestration infrastructure failures return 2.
+Agent process SUCCESS never overrides a failed boundary verification, and an agent failure never hides attributed
+changes or verification findings.
 
 ### `agentforge baseline`
 
@@ -194,12 +233,13 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.3 P2 connects the real Codex CLI adapter to an internal Execution Orchestrator but does not expose it through the
-CLI. Inspection, planning, prompt generation, boundary verification, snapshot capture, execution-delta comparison,
-and execution check remain deterministic, local, and explainable. Adapter command construction and control-plane
-ordering are deterministic; external Coding Agent output is not. Execution Check verifies boundary compliance; it
-does not decide whether code is correct or whether a bug is fixed. P2 terminates and reaps the direct child process on
-timeout but does not provide cross-platform descendant process-tree cleanup or repository rollback.
+V0.3 P3 exposes the internal Execution Orchestrator through `agentforge run`, backed by the production CodexAdapter
+registry mapping. Inspection, planning, prompt generation, boundary verification, snapshot capture, execution-delta
+comparison, and execution check remain deterministic, local, and explainable. Adapter command construction,
+control-plane ordering, and report structure are deterministic; external Coding Agent output is not. Execution Check
+verifies boundary compliance; it does not decide whether code is correct or whether a bug is fixed. Timeout handling
+terminates and reaps the direct child process but does not provide cross-platform descendant process-tree cleanup or
+repository rollback. P3 automated tests use fake adapters; real Codex end-to-end acceptance remains V0.3 P4.
 
 ### Task Inspection
 
@@ -213,4 +253,4 @@ Dependency expansion is Java-only, field/constructor based, and limited to one h
 
 - Machine-readable report output.
 - Richer parser-backed dependency analysis.
-- A user-facing `agentforge run` command over the internal execution orchestrator.
+- Real Codex end-to-end acceptance for `agentforge run`.
