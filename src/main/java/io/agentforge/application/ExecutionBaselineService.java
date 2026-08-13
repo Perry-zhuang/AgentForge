@@ -34,6 +34,13 @@ public class ExecutionBaselineService {
 
     public CaptureResult capture(Path repository, String task, Path output, boolean force) {
         EngineeringPlan plan = planService.plan(new EngineeringPlanRequest(repository, task));
+        ExecutionBaseline baseline = capture(plan);
+        Path destination = snapshotStore.writeExecution(baseline, output, force);
+        return new CaptureResult(baseline, destination);
+    }
+
+    public ExecutionBaseline capture(EngineeringPlan plan) {
+        if (plan == null) throw new IllegalArgumentException("Engineering plan is required for baseline capture");
         Path root = plan.repository().repository().path();
         ConfigLoader.LoadedPolicy policy = configLoader.loadPolicy(root);
         var architecture = configLoader.loadArchitecture(root);
@@ -41,16 +48,24 @@ public class ExecutionBaselineService {
         EngineeringBoundarySnapshot boundary = EngineeringBoundarySnapshot.capture(plan, policy.config().change(),
                 policy.defaultUsed(), architecture);
         RepositorySnapshot snapshot = stateCapture.capture(root);
-        ExecutionBaseline baseline = new ExecutionBaseline(
+        return new ExecutionBaseline(
                 ExecutionBaseline.CURRENT_SCHEMA_VERSION, snapshot, boundary);
-        Path destination = snapshotStore.writeExecution(baseline, output, force);
-        return new CaptureResult(baseline, destination);
     }
 
     public ComparisonResult compare(Path repository, String task, Path baselineFile) {
         ExecutionBaseline baseline = snapshotStore.readExecution(baselineFile);
         RepositorySnapshot current = stateCapture.capture(repository);
         snapshotStore.requireOutsideRepository(current.repositoryRoot(), baselineFile);
+        return compare(task, baseline, current);
+    }
+
+    public ComparisonResult compare(Path repository, String task, ExecutionBaseline baseline) {
+        if (baseline == null) throw new IllegalArgumentException("Execution baseline is required");
+        RepositorySnapshot current = stateCapture.capture(repository);
+        return compare(task, baseline, current);
+    }
+
+    private ComparisonResult compare(String task, ExecutionBaseline baseline, RepositorySnapshot current) {
         if (!baseline.engineeringBoundary().matchesTask(task)) {
             throw new IllegalArgumentException("Baseline task does not match requested task");
         }
@@ -72,5 +87,11 @@ public class ExecutionBaselineService {
             EngineeringBoundarySnapshot boundary,
             RepositorySnapshot currentSnapshot,
             ExecutionChangeReport execution
-    ) {}
+    ) {
+        public ComparisonResult {
+            if (boundary == null || currentSnapshot == null || execution == null) {
+                throw new IllegalArgumentException("Execution comparison facts are required");
+            }
+        }
+    }
 }

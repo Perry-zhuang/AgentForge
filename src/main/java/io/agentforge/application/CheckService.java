@@ -60,8 +60,12 @@ public class CheckService {
     }
 
     private VerificationReport checkExecution(VerificationRequest request) {
-        ExecutionBaselineService.ComparisonResult comparison = executionBaselineService.compare(
-                request.path(), request.task(), request.baselineFile());
+        return checkExecution(executionBaselineService.compare(
+                request.path(), request.task(), request.baselineFile()));
+    }
+
+    public VerificationReport checkExecution(ExecutionBaselineService.ComparisonResult comparison) {
+        if (comparison == null) throw new IllegalArgumentException("Execution comparison is required");
         EngineeringBoundarySnapshot boundary = comparison.boundary();
         ExecutionChangeReport execution = comparison.execution();
         ArchitectureReport currentArchitecture = currentArchitecture(boundary, comparison.currentSnapshot());

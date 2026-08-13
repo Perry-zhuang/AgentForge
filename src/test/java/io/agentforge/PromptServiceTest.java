@@ -5,6 +5,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
+import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
 
 import io.agentforge.application.PlanService;
@@ -29,5 +30,20 @@ class PromptServiceTest {
         assertThat(prompt.task()).isEqualTo(plan.task());
         verify(planService).plan(any());
         verifyNoMoreInteractions(planService);
+    }
+
+    @Test
+    void transformsAnAlreadyFrozenPlanWithoutReplanning() {
+        PlanService planService = mock(PlanService.class);
+        EngineeringPlan plan = PromptTestFixtures.plan(TaskType.ANALYSIS);
+        PromptService service = new PromptService(planService, new PromptEngine());
+
+        var prompt = service.fromPlan(plan);
+
+        assertThat(prompt.task()).isEqualTo(plan.task());
+        assertThat(prompt.taskType()).isEqualTo(plan.taskType());
+        assertThat(prompt.primaryScope().files()).extracting(file -> file.path())
+                .containsExactlyElementsOf(plan.scope().primary().stream().map(file -> file.path()).toList());
+        verifyNoInteractions(planService);
     }
 }

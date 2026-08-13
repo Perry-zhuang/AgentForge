@@ -1,6 +1,7 @@
 package io.agentforge.application;
 
 import io.agentforge.model.EngineeringPlanRequest;
+import io.agentforge.model.EngineeringPlan;
 import io.agentforge.model.EngineeringPrompt;
 import io.agentforge.model.EngineeringPromptRequest;
 import io.agentforge.prompting.PromptEngine;
@@ -17,6 +18,11 @@ public class PromptService {
     }
 
     public EngineeringPrompt prompt(EngineeringPromptRequest request) {
-        return promptEngine.create(planService.plan(new EngineeringPlanRequest(request.path(), request.task())));
+        return fromPlan(planService.plan(new EngineeringPlanRequest(request.path(), request.task())));
+    }
+
+    public EngineeringPrompt fromPlan(EngineeringPlan plan) {
+        if (plan == null) throw new IllegalArgumentException("Engineering plan is required for prompt generation");
+        return promptEngine.create(plan);
     }
 }

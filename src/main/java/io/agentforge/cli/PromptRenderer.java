@@ -4,12 +4,14 @@ import io.agentforge.model.EngineeringPrompt;
 import io.agentforge.model.ProjectTechnology;
 import io.agentforge.model.PromptScopeFile;
 import io.agentforge.model.PromptScopeSection;
+import io.agentforge.prompting.EngineeringPromptRenderer;
 import java.util.Collection;
 import java.util.stream.Collectors;
 import org.springframework.stereotype.Component;
 
 @Component
-public class PromptRenderer {
+public class PromptRenderer implements EngineeringPromptRenderer {
+    @Override
     public String render(EngineeringPrompt prompt) {
         StringBuilder out = new StringBuilder();
         heading(out, "Engineering Task");

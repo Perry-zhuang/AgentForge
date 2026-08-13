@@ -252,6 +252,51 @@ P1 deliberately supplies no approval or sandbox override. In particular, it neve
 safety boundary remain active. Authentication and network availability belong to the inherited Codex runtime
 environment. The Adapter does not login, refresh credentials, inject API keys, or reinterpret runtime failures.
 
-The explicit registry can map `CODEX` to a `CodexAdapter`, but P1 adds no application singleton or CLI wiring. There is
-still no `agentforge run`, execution orchestrator, baseline capture, execution delta comparison, Check invocation,
-rollback, or Git lifecycle behavior in the Adapter layer.
+The explicit registry can map `CODEX` to a `CodexAdapter`. P1 adds no user-facing CLI wiring and no baseline capture,
+execution delta comparison, Check invocation, rollback, or Git lifecycle behavior in the Adapter layer.
+
+## V0.3 P2 Execution Orchestrator
+
+```text
+AgentRunRequest
+    -> PlanService.plan(...) exactly once
+        -> frozen EngineeringPlan
+    -> PromptService.fromPlan(the same plan)
+    -> EngineeringPromptRenderer.render(...) exactly once
+    -> ExecutionBaselineService.capture(the same plan)
+        -> in-memory schema 2 task-aware baseline
+    -> CodingAgentRegistry.resolve(type)
+    -> CodingAgentAdapter.execute(...) exactly once
+    -> ExecutionBaselineService.compare(in-memory baseline)
+    -> CheckService.checkExecution(frozen boundary + execution delta)
+    -> AgentRunResult
+```
+
+`AgentExecutionService` is application orchestration, not a new governance engine. It sequences the existing Plan,
+Prompt, baseline, Adapter, delta, and Check boundaries. It depends on the adapter registry and a prompt-rendering port,
+not on `CodexAdapter`, process infrastructure, scanners, policy engines, planning engines, prompting engines, or Check
+engines. The production service writes no target-repository files and invokes no Git mutation command.
+
+The pre-execution `EngineeringPlan` is the only Plan used by the run. Prompt generation consumes that exact plan and
+does not call planning again. The in-memory task-aware baseline captures its Scope, TaskType, resolved change policy,
+and Architecture contract before `adapter.execute`. After execution, comparison captures current repository state but
+does not replan or reload after-state governance rules. Check consumes the frozen boundary and only the attributed
+execution delta. Therefore a newly generated, highly task-relevant file remains outside scope if it was outside the
+pre-execution boundary.
+
+Process outcome and verification outcome remain independent facts. `AgentRunStatus` gives process failure precedence
+for aggregate reporting (`AGENT_FAILED`, `AGENT_TIMED_OUT`, `AGENT_INTERRUPTED`, or `AGENT_START_FAILED`) while
+retaining the complete execution delta and `VerificationReport`. For a successful process, Check PASS/WARNING/FAIL
+maps to `PASS`, `WARNING`, or `VERIFICATION_FAILED`. A non-zero exit is never converted into a boundary violation, and
+an exit code of zero never implies verification success.
+
+An invalid repository or a Plan, Prompt, baseline-capture, or adapter-resolution infrastructure failure stops before
+agent invocation and is reported as a phase-specific `AgentRunException`. Once the adapter returns a process result,
+delta and verification are attempted even for non-success statuses. A later delta or Check infrastructure exception
+retains the completed process result, and a Check exception additionally retains the computed execution delta.
+
+P2 uses no temporary baseline file, so there is no prompt or baseline artifact inside the target repository and no
+cleanup lifecycle. It adds explicit local Spring wiring for the deterministic process executor, `CodexAdapter`, and
+registry, but still exposes no `agentforge run` command. It does not add rollback, Git add/commit/stash/reset/restore,
+multi-agent execution, parallel execution, retries, resume, streaming UI, Claude, Gemini, plugin discovery, or business
+correctness decisions.

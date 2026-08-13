@@ -17,8 +17,9 @@ V0.2 P4 P2 adds deterministic execution-window boundary verification on top of r
 - Minimal Change
 - Risk
 
-V0.3 P1 adds a Codex CLI adapter over the internal Coding Agent Adapter contract and deterministic external-process
-driver. There is deliberately no `agentforge run` command or execution orchestrator yet.
+V0.3 P2 adds an internal, sequential Execution Orchestrator over the Codex CLI adapter. It freezes one plan, prompt,
+and task-aware baseline before agent execution, then always computes the execution delta and frozen-boundary Check
+after the adapter returns. There is deliberately no `agentforge run` command yet.
 
 ## Why AgentForge
 
@@ -166,6 +167,13 @@ already rendered prompt unchanged through UTF-8 stdin, and reuses the common pro
 sandbox or approval override, use dangerous bypass flags, manage authentication, log environment secrets, or run Git
 lifecycle commands.
 
+The P2 `AgentExecutionService` is an application-layer control-plane coordinator. Its fixed lifecycle is Plan once,
+derive and render Prompt from that exact plan, capture an in-memory task-aware baseline from that exact plan, resolve
+one adapter, execute once, compare the post-execution repository to the in-memory baseline, and Check against the
+frozen boundary. It never asks after-state repository facts to recompute Plan, Prompt, TaskType, Scope, Policy, or
+Architecture constraints. Agent process failure, timeout, interruption, or start failure does not suppress delta and
+verification; the aggregate result retains process facts and the independent verification result.
+
 ## Known Limitations
 
 ### Architecture Analysis
@@ -186,11 +194,12 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.3 P1 defines a real Codex CLI adapter but does not expose it through the CLI or connect it to an execution
-orchestrator. Inspection, planning, prompt generation, boundary verification, snapshot capture,
-execution-delta comparison, and execution check remain deterministic, local, and explainable. Adapter command
-construction is deterministic; external Coding Agent output is not. Execution Check verifies boundary compliance; it
-does not decide whether code is correct or whether a bug is fixed.
+V0.3 P2 connects the real Codex CLI adapter to an internal Execution Orchestrator but does not expose it through the
+CLI. Inspection, planning, prompt generation, boundary verification, snapshot capture, execution-delta comparison,
+and execution check remain deterministic, local, and explainable. Adapter command construction and control-plane
+ordering are deterministic; external Coding Agent output is not. Execution Check verifies boundary compliance; it
+does not decide whether code is correct or whether a bug is fixed. P2 terminates and reaps the direct child process on
+timeout but does not provide cross-platform descendant process-tree cleanup or repository rollback.
 
 ### Task Inspection
 
@@ -204,4 +213,4 @@ Dependency expansion is Java-only, field/constructor based, and limited to one h
 
 - Machine-readable report output.
 - Richer parser-backed dependency analysis.
-- Prompt and coding-agent adapters after the governance core is stable.
+- A user-facing `agentforge run` command over the internal execution orchestrator.
