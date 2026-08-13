@@ -238,17 +238,19 @@ delta and invoke Check only after `execute` completes.
 executable name `codex`, it deterministically builds this minimal Codex CLI 0.144.5 command:
 
 ```text
-<codex-executable> exec -C <canonical-repository-root> -
+<codex-executable> exec --sandbox workspace-write -C <canonical-repository-root> -
 ```
 
-`exec` is Codex's non-interactive mode, `-C` explicitly selects the same canonical repository root used as the child
-process working directory, and `-` selects stdin prompt transport. `CodexAdapter` passes the request prompt, timeout,
-and environment overrides directly to the existing `DeterministicProcessExecutor`; it has no second process lifecycle
+`exec` is Codex's non-interactive mode, `--sandbox workspace-write` explicitly permits repository-local coding changes
+while retaining the workspace sandbox, `-C` selects the same canonical repository root used as the child process
+working directory, and `-` selects stdin prompt transport. `CodexAdapter` passes the request prompt, timeout, and
+environment overrides directly to the existing `DeterministicProcessExecutor`; it has no second process lifecycle
 implementation. It does not probe the version on each execution, place prompts in arguments or files, transform prompt
 content, or log prompts and environment values.
 
-P1 deliberately supplies no approval or sandbox override. In particular, it never adds
-`--dangerously-bypass-approvals-and-sandbox` or `--dangerously-bypass-hook-trust`; the normal Codex configuration and
+The adapter deliberately leaves approval behavior to the Codex runtime/configuration and never broadens the sandbox
+beyond workspace-write. In particular, it never adds extra writable directories, `danger-full-access`,
+`--dangerously-bypass-approvals-and-sandbox`, or `--dangerously-bypass-hook-trust`; the normal Codex approval and
 safety boundary remain active. Authentication and network availability belong to the inherited Codex runtime
 environment. The Adapter does not login, refresh credentials, inject API keys, or reinterpret runtime failures.
 

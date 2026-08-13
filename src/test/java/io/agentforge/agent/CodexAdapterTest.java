@@ -42,11 +42,12 @@ class CodexAdapterTest {
         List<String> first = adapter.command(request);
         List<String> second = adapter.command(request);
 
-        assertThat(first).containsExactly(executable.toString(), "exec", "-C",
-                repository.toRealPath().toString(), "-");
+        assertThat(first).containsExactly(executable.toString(), "exec", "--sandbox", "workspace-write",
+                "-C", repository.toRealPath().toString(), "-");
         assertThat(second).isEqualTo(first);
         assertThat(first).doesNotContain("--dangerously-bypass-approvals-and-sandbox",
-                "--dangerously-bypass-hook-trust", "--sandbox", "-s", "--ask-for-approval", "-a");
+                "--dangerously-bypass-hook-trust", "danger-full-access", "--yolo", "--full-auto",
+                "--ask-for-approval", "-a");
     }
 
     @Test
@@ -87,7 +88,7 @@ class CodexAdapterTest {
         assertThat(result.stdout()).isEqualTo("fake-codex-stdout");
         assertThat(result.stderr()).isEqualTo("fake-codex-stderr");
         assertThat(Files.readAllLines(evidence.resolve("argv.txt"))).containsExactly(
-                "exec", "-C", repository.toRealPath().toString(), "-");
+                "exec", "--sandbox", "workspace-write", "-C", repository.toRealPath().toString(), "-");
         assertThat(Files.readString(evidence.resolve("pwd.txt"))).isEqualTo(repository.toRealPath().toString());
         assertThat(Files.readString(evidence.resolve("environment.txt"))).isEqualTo("explicit-value");
         byte[] delivered = Files.readAllBytes(evidence.resolve("stdin.bin"));

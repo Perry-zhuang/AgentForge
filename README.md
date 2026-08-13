@@ -201,9 +201,11 @@ receives only agent identity, canonical repository root, the already rendered pr
 environment overrides. It drives one external process and reports stdout, stderr, process exit code, timeout,
 interruption, and start-failure facts. Adapter process success is never equivalent to `CHECK EXECUTION PASS`.
 
-The Codex adapter invokes the configured executable as `codex exec -C <canonical-repository-root> -`, supplies the
-already rendered prompt unchanged through UTF-8 stdin, and reuses the common process executor. It does not add a
-sandbox or approval override, use dangerous bypass flags, manage authentication, log environment secrets, or run Git
+The Codex adapter invokes the configured executable as
+`codex exec --sandbox workspace-write -C <canonical-repository-root> -`, supplies the already rendered prompt
+unchanged through UTF-8 stdin, and reuses the common process executor. The explicit workspace-write sandbox permits
+coding changes only within the controlled target workspace. The adapter does not override approval behavior, add
+extra writable directories, use dangerous bypass flags, manage authentication, log environment secrets, or run Git
 lifecycle commands.
 
 The P2 `AgentExecutionService` is an application-layer control-plane coordinator. Its fixed lifecycle is Plan once,

@@ -55,6 +55,7 @@ public final class CodexAdapter implements CodingAgentAdapter {
         if (!identity().equals(request.agent())) {
             throw new IllegalArgumentException("Execution request identity does not match Codex adapter identity");
         }
-        return List.of(executable, "exec", "-C", request.repositoryRoot().toString(), "-");
+        return List.of(executable, "exec", "--sandbox", "workspace-write",
+                "-C", request.repositoryRoot().toString(), "-");
     }
 }
