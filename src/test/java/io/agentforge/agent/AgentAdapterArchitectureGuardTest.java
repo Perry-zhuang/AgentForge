@@ -47,6 +47,22 @@ class AgentAdapterArchitectureGuardTest {
     }
 
     @Test
+    void codexAdapterUsesNoDangerousBypassCredentialOrGovernanceBehavior() throws IOException {
+        String source = Files.readString(Path.of("src/main/java/io/agentforge/agent/CodexAdapter.java"));
+
+        assertThat(source).doesNotContain(
+                "--dangerously-bypass-approvals-and-sandbox",
+                "--dangerously-bypass-hook-trust",
+                "OPENAI_API_KEY",
+                "System.getenv",
+                "Files.write",
+                "PlanService",
+                "PromptService",
+                "BaselineService",
+                "CheckService");
+    }
+
+    @Test
     void requestAndResultExposeOnlyProcessDrivingFacts() {
         assertThat(List.of(AgentExecutionRequest.class.getRecordComponents()).stream()
                 .map(component -> component.getName() + ":" + component.getType().getName()))

@@ -17,8 +17,8 @@ V0.2 P4 P2 adds deterministic execution-window boundary verification on top of r
 - Minimal Change
 - Risk
 
-V0.3 P0 adds the internal Coding Agent Adapter contract and a deterministic external-process driver. There is
-deliberately no `agentforge run` command yet, and no real Codex process is invoked by AgentForge in P0.
+V0.3 P1 adds a Codex CLI adapter over the internal Coding Agent Adapter contract and deterministic external-process
+driver. There is deliberately no `agentforge run` command or execution orchestrator yet.
 
 ## Why AgentForge
 
@@ -161,6 +161,11 @@ receives only agent identity, canonical repository root, the already rendered pr
 environment overrides. It drives one external process and reports stdout, stderr, process exit code, timeout,
 interruption, and start-failure facts. Adapter process success is never equivalent to `CHECK EXECUTION PASS`.
 
+The Codex adapter invokes the configured executable as `codex exec -C <canonical-repository-root> -`, supplies the
+already rendered prompt unchanged through UTF-8 stdin, and reuses the common process executor. It does not add a
+sandbox or approval override, use dangerous bypass flags, manage authentication, log environment secrets, or run Git
+lifecycle commands.
+
 ## Known Limitations
 
 ### Architecture Analysis
@@ -181,11 +186,11 @@ V0.1.1 reports architecture findings present in changed source files. It does no
 
 ### AI
 
-V0.3 P0 defines a Coding Agent adapter contract and tests it only with a fake adapter and local Java child process.
-It does not invoke a real Coding Agent or expose execution through the CLI. Inspection, planning, prompt generation,
-boundary verification, snapshot capture, execution-delta comparison, and execution check remain deterministic,
-local, and explainable. Execution Check verifies boundary compliance; it does not decide whether code is correct or
-whether a bug is fixed.
+V0.3 P1 defines a real Codex CLI adapter but does not expose it through the CLI or connect it to an execution
+orchestrator. Inspection, planning, prompt generation, boundary verification, snapshot capture,
+execution-delta comparison, and execution check remain deterministic, local, and explainable. Adapter command
+construction is deterministic; external Coding Agent output is not. Execution Check verifies boundary compliance; it
+does not decide whether code is correct or whether a bug is fixed.
 
 ### Task Inspection
 

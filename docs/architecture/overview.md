@@ -228,6 +228,30 @@ process completed successfully. It does not mean scope, policy, architecture, ta
 verification passed. Likewise, a non-zero process exit is not represented as an Engineering Boundary violation.
 
 The registry is an explicit in-process `CodingAgentType -> CodingAgentAdapter` mapping. P0 defines only `CODEX` as an
-identity type and does not implement network discovery, SPI loading, a runtime plugin ecosystem, a real Codex CLI
-adapter, an execution orchestrator, or `agentforge run`. Future orchestration must freeze the Engineering Boundary and
-capture the baseline before `execute`, then compute execution delta and invoke Check only after `execute` completes.
+identity type and does not implement network discovery, SPI loading, or a runtime plugin ecosystem. Future
+orchestration must freeze the Engineering Boundary and capture the baseline before `execute`, then compute execution
+delta and invoke Check only after `execute` completes.
+
+## V0.3 P1 Codex CLI Adapter
+
+`CodexAdapter` is the first real `CodingAgentAdapter` implementation. With an explicit executable path, or the fallback
+executable name `codex`, it deterministically builds this minimal Codex CLI 0.144.5 command:
+
+```text
+<codex-executable> exec -C <canonical-repository-root> -
+```
+
+`exec` is Codex's non-interactive mode, `-C` explicitly selects the same canonical repository root used as the child
+process working directory, and `-` selects stdin prompt transport. `CodexAdapter` passes the request prompt, timeout,
+and environment overrides directly to the existing `DeterministicProcessExecutor`; it has no second process lifecycle
+implementation. It does not probe the version on each execution, place prompts in arguments or files, transform prompt
+content, or log prompts and environment values.
+
+P1 deliberately supplies no approval or sandbox override. In particular, it never adds
+`--dangerously-bypass-approvals-and-sandbox` or `--dangerously-bypass-hook-trust`; the normal Codex configuration and
+safety boundary remain active. Authentication and network availability belong to the inherited Codex runtime
+environment. The Adapter does not login, refresh credentials, inject API keys, or reinterpret runtime failures.
+
+The explicit registry can map `CODEX` to a `CodexAdapter`, but P1 adds no application singleton or CLI wiring. There is
+still no `agentforge run`, execution orchestrator, baseline capture, execution delta comparison, Check invocation,
+rollback, or Git lifecycle behavior in the Adapter layer.
