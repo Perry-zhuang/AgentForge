@@ -243,6 +243,18 @@ verifies boundary compliance; it does not decide whether code is correct or whet
 terminates and reaps the direct child process but does not provide cross-platform descendant process-tree cleanup or
 repository rollback. P3 automated tests use fake adapters; real Codex end-to-end acceptance remains V0.3 P4.
 
+`agentforge run` renders the complete Coding Agent stdout in the terminal and automatically archives every controlled
+execution under `~/.agentforge/runs/<date>/<run-id>/`. Each archive contains `question.md`, the exact transmitted
+`prompt.md`, raw `agent-output.md`, raw `agent-stderr.log`, a human-readable `report.md`, and schema-versioned
+`run.json`. Prompt and stream SHA-256 values in the manifest are calculated over the exact UTF-8 evidence bytes.
+Archives are control-plane state and must remain outside the target repository.
+
+An optional `--output <report.md>` copies the exact archived report bytes to a new Markdown file outside the target
+repository. Parent directories are created when needed; existing files, non-Markdown destinations, canonical paths
+inside the repository, and symlink aliases into it are rejected before the Coding Agent runs. Run traces use restrictive
+POSIX permissions where supported. Trace history is not automatically deleted, so `~/.agentforge/runs` may grow over
+time; history browsing and retention are intentionally deferred.
+
 ### Task Inspection
 
 V0.2 P1 inspection is lexical and structural, not semantic search. It does not translate between languages, infer synonyms, build method call graphs, or understand runtime behavior. Chinese input uses deterministic, dictionary-free core-token splitting plus weak derived n-grams. Core-token coverage is computed within one logical source line, with a bounded window for long lines, so unrelated declarations cannot be combined into artificial full coverage.

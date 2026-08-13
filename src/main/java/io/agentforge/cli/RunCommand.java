@@ -14,6 +14,7 @@ import picocli.CommandLine.Model.CommandSpec;
 import picocli.CommandLine.Option;
 import picocli.CommandLine.Parameters;
 import picocli.CommandLine.Spec;
+import io.agentforge.application.AgentRunException;
 
 /** Thin CLI entry point over the frozen execution-orchestration lifecycle. */
 @Component
@@ -40,6 +41,10 @@ public class RunCommand implements Callable<Integer> {
             description = "Agent execution timeout in whole seconds (default: ${DEFAULT-VALUE}).")
     private int timeoutSeconds;
 
+    @Option(names = "--output", paramLabel = "FILE",
+            description = "Export the archived human-readable report to a new .md file.")
+    private Path output;
+
     public RunCommand(AgentExecutionService executionService, RunRenderer renderer) {
         this.executionService = executionService;
         this.renderer = renderer;
@@ -54,11 +59,20 @@ public class RunCommand implements Callable<Integer> {
             Path path = arguments.length == 1 ? Path.of(".") : Path.of(arguments[0]);
             String task = arguments.length == 1 ? arguments[0] : arguments[1];
             AgentRunRequest request = new AgentRunRequest(path, task, CodingAgentType.parse(agent),
-                    Duration.ofSeconds(timeoutSeconds), Map.of());
+                    Duration.ofSeconds(timeoutSeconds), Map.of(), output);
             AgentRunResult result = executionService.execute(request);
             spec.commandLine().getOut().print(renderer.render(result));
             spec.commandLine().getOut().flush();
             return successful(result) ? 0 : 1;
+        } catch (AgentRunException exception) {
+            if (exception.runTrace().isPresent()) {
+                spec.commandLine().getOut().print(renderer.renderIncomplete(exception));
+                spec.commandLine().getOut().flush();
+            } else {
+                spec.commandLine().getErr().println("ERROR " + exception.getMessage());
+                spec.commandLine().getErr().flush();
+            }
+            return 2;
         } catch (RuntimeException exception) {
             spec.commandLine().getErr().println("ERROR " + exception.getMessage());
             spec.commandLine().getErr().flush();

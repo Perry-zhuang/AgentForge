@@ -303,6 +303,28 @@ registry; P2 itself exposed no `agentforge run` command. It does not add rollbac
 multi-agent execution, parallel execution, retries, resume, streaming UI, Claude, Gemini, plugin discovery, or business
 correctness decisions.
 
+## V0.3.1 Result Delivery and Run Trace
+
+The execution lifecycle now preserves a local Engineering Execution Evidence Chain without changing frozen governance
+semantics:
+
+```text
+Plan -> Prompt -> task-aware baseline -> prepare external run archive -> Agent
+     -> persist raw stdout/stderr -> execution delta -> frozen-boundary Check
+     -> report/run.json completion -> optional exact Markdown export
+```
+
+`RunTraceService` is a fact-consumer port. Its local filesystem implementation does not inspect source, plan, classify,
+or verify. It stores the original question, exact rendered prompt, exact process streams, existing delta and verification
+facts, and the aggregate decision. Infrastructure failure after Agent execution produces an INCOMPLETE trace containing
+all available partial evidence. Failure to prepare the trace prevents Agent invocation.
+
+Trace metadata such as run ID and timestamps is intentionally execution-specific and never enters EngineeringPlan,
+EngineeringBoundarySnapshot, ExecutionChangeReport, or VerificationReport. The default user-level archive and optional
+Markdown export are canonicalized and rejected when they resolve inside the target repository, preventing control-plane
+evidence from polluting the execution delta. POSIX directory/file permissions are restricted to 0700/0600 where the
+platform supports them.
+
 ## V0.3 P3 Run CLI
 
 ```text

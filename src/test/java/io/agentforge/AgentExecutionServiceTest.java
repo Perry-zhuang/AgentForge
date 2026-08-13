@@ -58,6 +58,8 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
+import io.agentforge.runtrace.RunTraceReference;
+import io.agentforge.runtrace.RunTraceService;
 
 class AgentExecutionServiceTest {
     private static final CodingAgentIdentity CODEX = new CodingAgentIdentity(CodingAgentType.CODEX, "codex",
@@ -156,6 +158,21 @@ class AgentExecutionServiceTest {
     }
 
     @Test
+    void tracePreparationFailureStopsBeforeAdapterInvocation() {
+        Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
+        when(fixture.runTraceService.prepare(any(), any(), any(), any(), any()))
+                .thenThrow(new IllegalStateException("archive unavailable"));
+
+        assertThatThrownBy(() -> fixture.service.execute(request()))
+                .isInstanceOfSatisfying(AgentRunException.class,
+                        exception -> assertThat(exception.phase()).isEqualTo(AgentRunException.Phase.TRACE_PREPARE));
+
+        verify(fixture.adapter, never()).execute(any());
+        verify(fixture.baselineService, never()).compare(any(Path.class), any(String.class),
+                any(ExecutionBaseline.class));
+    }
+
+    @Test
     void invalidRepositoryNeverPlansOrInvokesAdapter() {
         Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
         AgentRunRequest request = new AgentRunRequest(repository.resolve("missing"), "修复任务异常",
@@ -181,7 +198,9 @@ class AgentExecutionServiceTest {
                     assertThat(exception.phase()).isEqualTo(AgentRunException.Phase.VERIFICATION);
                     assertThat(exception.agentResult()).containsSame(fixture.agentResult);
                     assertThat(exception.executionDelta()).containsSame(fixture.execution);
+                    assertThat(exception.runTrace()).isPresent();
                 });
+        verify(fixture.runTraceService).fail(any(), any(), any(), any(), any());
     }
 
     @Test
@@ -222,6 +241,7 @@ class AgentExecutionServiceTest {
         CodingAgentRegistry registry = mock(CodingAgentRegistry.class);
         CodingAgentAdapter adapter = mock(CodingAgentAdapter.class);
         CheckService checkService = mock(CheckService.class);
+        RunTraceService runTraceService = mock(RunTraceService.class);
         Path root = canonicalRepository();
         EngineeringPlan plan = atRepository(PromptTestFixtures.plan(TaskType.BUGFIX), root);
         EngineeringPrompt prompt = new PromptEngine().create(plan);
@@ -247,12 +267,16 @@ class AgentExecutionServiceTest {
         when(registry.resolve(CodingAgentType.CODEX)).thenReturn(adapter);
         when(adapter.identity()).thenReturn(CODEX);
         when(adapter.execute(any())).thenReturn(agentResult);
+        RunTraceReference trace = new RunTraceReference("test-run", Path.of("/tmp/test-run"),
+                Path.of("/tmp/test-run/report.md"), null);
+        when(runTraceService.prepare(any(), any(), any(), any(), any())).thenReturn(trace);
+        when(runTraceService.complete(any(), any())).thenReturn(trace);
         when(baselineService.compare(root, plan.task(), baseline)).thenReturn(comparison);
         when(checkService.checkExecution(comparison)).thenReturn(verification);
         AgentExecutionService service = new AgentExecutionService(planService, promptService, renderer,
-                baselineService, registry, checkService);
+                baselineService, registry, checkService, runTraceService);
         return new Fixture(service, planService, promptService, renderer, baselineService, registry, adapter,
-                checkService, plan, prompt, baseline, comparison, execution, verification, agentResult);
+                checkService, runTraceService, plan, prompt, baseline, comparison, execution, verification, agentResult);
     }
 
     private EngineeringPlan atRepository(EngineeringPlan source, Path root) {
@@ -322,6 +346,7 @@ class AgentExecutionServiceTest {
             CodingAgentRegistry registry,
             CodingAgentAdapter adapter,
             CheckService checkService,
+            RunTraceService runTraceService,
             EngineeringPlan plan,
             EngineeringPrompt prompt,
             ExecutionBaseline baseline,

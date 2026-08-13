@@ -34,7 +34,7 @@ class RunCommandTest {
         Fixture fixture = fixture(AgentRunStatus.PASS);
 
         Result result = fixture.execute(repository.toString(), "修复登录异常", "--agent", "CoDeX",
-                "--timeout-seconds", "37");
+                "--timeout-seconds", "37", "--output", repository.getParent().resolve("report.md").toString());
 
         assertThat(result.exitCode()).isZero();
         assertThat(result.output()).isEqualTo("rendered run\n");
@@ -47,6 +47,7 @@ class RunCommandTest {
         assertThat(request.getValue().agentType()).isEqualTo(CodingAgentType.CODEX);
         assertThat(request.getValue().timeout()).isEqualTo(Duration.ofSeconds(37));
         assertThat(request.getValue().environmentOverrides()).isEmpty();
+        assertThat(request.getValue().outputFile()).isEqualTo(repository.getParent().resolve("report.md").toAbsolutePath());
     }
 
     @Test

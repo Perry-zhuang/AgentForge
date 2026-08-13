@@ -24,7 +24,7 @@ import org.junit.jupiter.api.Test;
 
 class RunRendererTest {
     @Test
-    void rendersAllAggregateDecisionsWithoutRawPromptOrProcessStreams() {
+    void rendersAllAggregateDecisionsWithAgentOutputButWithoutRawStderr() {
         assertDecision(AgentRunStatus.PASS, "AGENT RUN PASS");
         assertDecision(AgentRunStatus.WARNING, "AGENT RUN WARNING");
         assertDecision(AgentRunStatus.VERIFICATION_FAILED, "AGENT RUN VERIFICATION FAILED");
@@ -51,8 +51,9 @@ class RunRendererTest {
                 "REFERENCE                1",
                 "Status                   SUCCESS",
                 "Exit Code                0",
-                "stdout Captured          YES",
                 "stderr Captured          YES",
+                "Agent Output",
+                "raw stdout body",
                 "Files                    1",
                 "MODIFIED src/main/java/demo/OutsideService.java CONTENT_CHANGED GIT_STATE_CHANGED",
                 "Scope                    FAIL",
@@ -61,10 +62,21 @@ class RunRendererTest {
                 "Architecture             NOT CONFIGURED",
                 "OUT_OF_SCOPE_MODIFICATION",
                 "AGENT RUN VERIFICATION FAILED");
-        assertThat(rendered).doesNotContain("raw stdout body", "raw stderr body", "prepared secret prompt");
+        assertThat(rendered).doesNotContain("raw stderr body", "prepared secret prompt");
         assertThat(rendered.indexOf("Agent Execution")).isLessThan(rendered.indexOf("Execution Delta"));
         assertThat(rendered.indexOf("Execution Delta")).isLessThan(rendered.indexOf("Verification"));
         assertThat(rendered.indexOf("Verification")).isLessThan(rendered.indexOf("Decision"));
+    }
+
+    @Test
+    void preservesChineseMarkdownOutputAndMarksEmptyOutput() {
+        AgentRunResult populated = result(AgentRunStatus.PASS);
+        when(populated.agentExecutionResult().stdout()).thenReturn("  根据分析：\n\n- 用户不会重复创建\n");
+        assertThat(new RunRenderer().render(populated)).contains("  根据分析：\n\n- 用户不会重复创建\n");
+
+        AgentRunResult empty = result(AgentRunStatus.PASS);
+        when(empty.agentExecutionResult().stdout()).thenReturn("");
+        assertThat(new RunRenderer().render(empty)).contains("No agent output produced.");
     }
 
     private void assertDecision(AgentRunStatus status, String decision) {

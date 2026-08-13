@@ -60,10 +60,18 @@ import java.io.PrintWriter;
 import java.io.StringWriter;
 import java.util.Map;
 import java.util.List;
+import io.agentforge.runtrace.LocalRunTraceService;
+import io.agentforge.runtrace.RunMarkdownRenderer;
+import java.time.Clock;
+import java.io.IOException;
+import java.io.UncheckedIOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
 import java.util.Set;
 import picocli.CommandLine;
 
 final class CliTestHarness {
+    private static final Path TRACE_ROOT = createTraceRoot();
     private CliTestHarness() {}
 
     static Result execute(String... args) {
@@ -101,7 +109,9 @@ final class CliTestHarness {
                 new ExecutionArchitectureAttributor(), new CheckEngine());
         AgentExecutionService agentExecutionService = new AgentExecutionService(planService, promptService,
                 new PromptRenderer(), executionBaselineService, new CodingAgentRegistry(List.of(adapter)),
-                checkService);
+                checkService, new LocalRunTraceService(TRACE_ROOT,
+                        Clock.fixed(java.time.Instant.parse("2026-08-13T08:00:00Z"), java.time.ZoneOffset.UTC),
+                        instant -> "cli-fixed-run", new RunMarkdownRenderer()));
         TextReportRenderer renderer = new TextReportRenderer();
         PromptRenderer promptRenderer = new PromptRenderer();
         CheckRenderer checkRenderer = new CheckRenderer();
@@ -142,6 +152,14 @@ final class CliTestHarness {
         commandLine.setErr(new PrintWriter(output));
         int exit = commandLine.execute(args);
         return new Result(exit, output.toString());
+    }
+
+    private static Path createTraceRoot() {
+        try {
+            return Files.createTempDirectory("agentforge-cli-traces-");
+        } catch (IOException exception) {
+            throw new UncheckedIOException(exception);
+        }
     }
 
     private static final class NoOpCodingAgentAdapter implements CodingAgentAdapter {

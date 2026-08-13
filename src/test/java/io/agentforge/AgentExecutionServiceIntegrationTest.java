@@ -58,6 +58,11 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import java.util.function.Consumer;
+import io.agentforge.runtrace.LocalRunTraceService;
+import io.agentforge.runtrace.RunMarkdownRenderer;
+import java.time.Clock;
+import java.time.Instant;
+import java.time.ZoneOffset;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
@@ -82,6 +87,10 @@ class AgentExecutionServiceIntegrationTest {
         assertThat(result.executionChangeReport().hasExecutionChanges()).isFalse();
         assertThat(result.verificationReport().overallStatus()).isEqualTo(VerificationStatus.PASS);
         assertThat(adapter.requests).hasSize(1);
+        assertThat(Files.readString(result.runTrace().archiveDirectory().resolve("prompt.md")))
+                .isEqualTo(adapter.requests.get(0).renderedPrompt());
+        assertThat(sha(Files.readString(result.runTrace().archiveDirectory().resolve("prompt.md"))))
+                .isEqualTo(sha(adapter.requests.get(0).renderedPrompt()));
         assertThat(facts(root)).isEqualTo(before);
     }
 
@@ -136,6 +145,8 @@ class AgentExecutionServiceIntegrationTest {
         assertThat(result.executionChangeReport().changes()).extracting(ExecutionChangeReport.ExecutionChange::path)
                 .containsExactly("src/main/java/demo/GeneratedOutsideService.java");
         assertThat(Files.exists(root.resolve("src/main/java/demo/GeneratedOutsideService.java"))).isTrue();
+        assertThat(Files.readString(result.runTrace().archiveDirectory().resolve("run.json")))
+                .contains("\"status\" : \"FAILED\"", "\"status\" : \"COMPLETE\"");
     }
 
     @Test
@@ -151,6 +162,8 @@ class AgentExecutionServiceIntegrationTest {
         assertThat(result.verificationReport().overallStatus()).isEqualTo(VerificationStatus.FAIL);
         assertThat(result.verificationReport().findings()).extracting(finding -> finding.code())
                 .contains("OUT_OF_SCOPE_MODIFICATION");
+        assertThat(Files.readString(result.runTrace().archiveDirectory().resolve("run.json")))
+                .contains("\"status\" : \"TIMED_OUT\"", "\"status\" : \"COMPLETE\"");
     }
 
     @Test
@@ -220,7 +233,10 @@ class AgentExecutionServiceIntegrationTest {
                 repositoryScanner, architectureScanner, policyEngine,
                 new ExecutionArchitectureAttributor(), new CheckEngine());
         return new AgentExecutionService(planService, promptService, new PromptRenderer(), baselineService,
-                new CodingAgentRegistry(List.of(adapter)), checkService);
+                new CodingAgentRegistry(List.of(adapter)), checkService,
+                new LocalRunTraceService(temp.resolve("traces"),
+                        Clock.fixed(Instant.parse("2026-08-13T08:00:00Z"), ZoneOffset.UTC),
+                        instant -> "integration-run-" + System.nanoTime(), new RunMarkdownRenderer()));
     }
 
     private AgentRunRequest request(Path root, String task) {
@@ -268,6 +284,11 @@ class AgentExecutionServiceIntegrationTest {
             }
         }
         return result;
+    }
+
+    private String sha(String value) throws Exception {
+        return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
+                .digest(value.getBytes(java.nio.charset.StandardCharsets.UTF_8)));
     }
 
     private static void append(Path path, String content) {

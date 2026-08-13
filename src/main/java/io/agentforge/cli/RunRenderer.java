@@ -6,8 +6,9 @@ import io.agentforge.model.ExecutionChangeReport;
 import io.agentforge.model.VerificationFinding;
 import java.util.Locale;
 import org.springframework.stereotype.Component;
+import io.agentforge.application.AgentRunException;
 
-/** Deterministic formatting of aggregate run facts; raw prompts and process streams are intentionally omitted. */
+/** Deterministic formatting of aggregate run facts and the agent's delivered stdout. */
 @Component
 public class RunRenderer {
     public String render(AgentRunResult result) {
@@ -29,11 +30,15 @@ public class RunRenderer {
         row(out, "Status", result.agentExecutionResult().status());
         row(out, "Exit Code", result.agentExecutionResult().processExitCode() == null
                 ? "N/A" : result.agentExecutionResult().processExitCode());
-        row(out, "stdout Captured", present(result.agentExecutionResult().stdout()));
         row(out, "stderr Captured", present(result.agentExecutionResult().stderr()));
         if (!result.agentExecutionResult().failureMessage().isBlank()) {
             row(out, "Failure Detail", result.agentExecutionResult().failureMessage());
         }
+
+        section(out, "Agent Output");
+        if (result.agentExecutionResult().stdout().isEmpty()) out.append("No agent output produced.\n");
+        else out.append(result.agentExecutionResult().stdout())
+                .append(result.agentExecutionResult().stdout().endsWith("\n") ? "" : "\n");
 
         section(out, "Execution Delta");
         row(out, "Files", result.executionChangeReport().changes().size());
@@ -64,6 +69,43 @@ public class RunRenderer {
 
         section(out, "Decision");
         out.append("AGENT RUN ").append(decision(result.status())).append('\n');
+        if (result.runTrace() != null) {
+            section(out, "Run Trace");
+            row(out, "Run ID", result.runTrace().runId());
+            row(out, "Archive", result.runTrace().archiveDirectory());
+            row(out, "Report", result.runTrace().reportFile().getFileName());
+            if (result.runTrace().exportedReport() != null) {
+                section(out, "Export");
+                row(out, "Saved", result.runTrace().exportedReport());
+            }
+        }
+        return out.toString();
+    }
+
+    public String renderIncomplete(AgentRunException failure) {
+        StringBuilder out = new StringBuilder("AgentForge Run\n");
+        failure.agentResult().ifPresent(agent -> {
+            section(out, "Agent Execution");
+            row(out, "Status", agent.status());
+            row(out, "Exit Code", agent.processExitCode() == null ? "N/A" : agent.processExitCode());
+            section(out, "Agent Output");
+            out.append(agent.stdout().isEmpty() ? "No agent output produced.\n" : agent.stdout()
+                    + (agent.stdout().endsWith("\n") ? "" : "\n"));
+        });
+        section(out, "Execution Delta");
+        row(out, "Files", failure.executionDelta().<Object>map(delta -> delta.changes().size())
+                .orElse("INCOMPLETE"));
+        section(out, "Verification");
+        row(out, "Overall", "INCOMPLETE");
+        section(out, "Run Trace");
+        failure.runTrace().ifPresent(trace -> {
+            row(out, "Archive", trace.archiveDirectory());
+            row(out, "Lifecycle", "INCOMPLETE");
+        });
+        row(out, "Failure Stage", failure.phase());
+        row(out, "Failure Detail", failure.getMessage());
+        section(out, "Decision");
+        out.append("AGENT RUN INCOMPLETE\n");
         return out.toString();
     }
 

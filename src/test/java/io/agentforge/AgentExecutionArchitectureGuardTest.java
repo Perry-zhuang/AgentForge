@@ -46,7 +46,7 @@ class AgentExecutionArchitectureGuardTest {
         assertThat(List.of(AgentRunResult.class.getRecordComponents()).stream()
                 .map(component -> component.getName()))
                 .containsExactly("repositoryRoot", "task", "taskType", "agent", "plan", "prompt",
-                        "agentExecutionResult", "executionChangeReport", "verificationReport", "status")
+                        "agentExecutionResult", "executionChangeReport", "verificationReport", "status", "runTrace")
                 .doesNotContain("renderedPrompt", "repositorySnapshot", "policyReport", "architectureReport");
     }
 

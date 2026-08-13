@@ -19,6 +19,8 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.function.Supplier;
+import io.agentforge.runtrace.RunTraceReference;
+import io.agentforge.runtrace.RunTraceService;
 import org.springframework.stereotype.Service;
 
 /** Deterministic sequential orchestration over existing planning, execution, delta, and check boundaries. */
@@ -30,17 +32,20 @@ public class AgentExecutionService {
     private final ExecutionBaselineService executionBaselineService;
     private final CodingAgentRegistry agentRegistry;
     private final CheckService checkService;
+    private final RunTraceService runTraceService;
 
     public AgentExecutionService(PlanService planService, PromptService promptService,
                                  EngineeringPromptRenderer promptRenderer,
                                  ExecutionBaselineService executionBaselineService,
-                                 CodingAgentRegistry agentRegistry, CheckService checkService) {
+                                 CodingAgentRegistry agentRegistry, CheckService checkService,
+                                 RunTraceService runTraceService) {
         this.planService = planService;
         this.promptService = promptService;
         this.promptRenderer = promptRenderer;
         this.executionBaselineService = executionBaselineService;
         this.agentRegistry = agentRegistry;
         this.checkService = checkService;
+        this.runTraceService = runTraceService;
     }
 
     public AgentRunResult execute(AgentRunRequest request) {
@@ -62,28 +67,60 @@ public class AgentExecutionService {
         CodingAgentAdapter adapter = phase(AgentRunException.Phase.ADAPTER_RESOLUTION,
                 () -> agentRegistry.resolve(request.agentType()));
         CodingAgentIdentity agent = phase(AgentRunException.Phase.AGENT_INVOCATION, adapter::identity);
+        RunTraceReference trace = phase(AgentRunException.Phase.TRACE_PREPARE,
+                () -> runTraceService.prepare(request, plan, renderedPrompt, baseline, agent));
         AgentExecutionRequest executionRequest = phase(AgentRunException.Phase.AGENT_INVOCATION,
                 () -> new AgentExecutionRequest(agent, repositoryRoot, renderedPrompt,
                         request.timeout(), request.environmentOverrides()));
-        AgentExecutionResult agentResult = phase(AgentRunException.Phase.AGENT_INVOCATION,
-                () -> adapter.execute(executionRequest));
+        AgentExecutionResult agentResult;
+        try {
+            agentResult = adapter.execute(executionRequest);
+        } catch (RuntimeException exception) {
+            AgentRunException failure = failure(AgentRunException.Phase.AGENT_INVOCATION, exception, null, null, trace);
+            runTraceService.fail(trace, failure.phase(), failure.getMessage(), null, null);
+            throw failure;
+        }
+        try {
+            runTraceService.persistAgentResult(trace, agentResult);
+        } catch (RuntimeException exception) {
+            AgentRunException failure = failure(AgentRunException.Phase.TRACE_PERSISTENCE, exception,
+                    agentResult, null, trace);
+            safelyFailTrace(trace, failure, agentResult, null);
+            throw failure;
+        }
 
         ExecutionBaselineService.ComparisonResult comparison;
         try {
             comparison = executionBaselineService.compare(repositoryRoot, request.task(), baseline);
         } catch (RuntimeException exception) {
-            throw failure(AgentRunException.Phase.EXECUTION_DELTA, exception, agentResult, null);
+            AgentRunException failure = failure(AgentRunException.Phase.EXECUTION_DELTA, exception,
+                    agentResult, null, trace);
+            safelyFailTrace(trace, failure, agentResult, null);
+            throw failure;
         }
         ExecutionChangeReport executionDelta = comparison.execution();
         VerificationReport verification;
         try {
             verification = checkService.checkExecution(comparison);
         } catch (RuntimeException exception) {
-            throw failure(AgentRunException.Phase.VERIFICATION, exception, agentResult, executionDelta);
+            AgentRunException failure = failure(AgentRunException.Phase.VERIFICATION, exception,
+                    agentResult, executionDelta, trace);
+            safelyFailTrace(trace, failure, agentResult, executionDelta);
+            throw failure;
         }
         AgentRunStatus status = AgentRunStatus.decide(agentResult.status(), verification.overallStatus());
-        return new AgentRunResult(repositoryRoot, request.task(), plan.taskType(), agent, plan, prompt,
-                agentResult, executionDelta, verification, status);
+        AgentRunResult provisional = new AgentRunResult(repositoryRoot, request.task(), plan.taskType(), agent, plan,
+                prompt, agentResult, executionDelta, verification, status, trace);
+        try {
+            RunTraceReference completed = runTraceService.complete(trace, provisional);
+            return new AgentRunResult(repositoryRoot, request.task(), plan.taskType(), agent, plan, prompt,
+                    agentResult, executionDelta, verification, status, completed);
+        } catch (RuntimeException exception) {
+            AgentRunException failure = failure(AgentRunException.Phase.TRACE_PERSISTENCE, exception,
+                    agentResult, executionDelta, trace);
+            safelyFailTrace(trace, failure, agentResult, executionDelta);
+            throw failure;
+        }
     }
 
     private Path canonicalDirectory(Path repository) {
@@ -108,8 +145,23 @@ public class AgentExecutionService {
 
     private AgentRunException failure(AgentRunException.Phase phase, RuntimeException cause,
                                       AgentExecutionResult agentResult, ExecutionChangeReport executionDelta) {
+        return failure(phase, cause, agentResult, executionDelta, null);
+    }
+
+    private AgentRunException failure(AgentRunException.Phase phase, RuntimeException cause,
+                                      AgentExecutionResult agentResult, ExecutionChangeReport executionDelta,
+                                      RunTraceReference trace) {
         String detail = cause.getMessage() == null ? cause.getClass().getSimpleName() : cause.getMessage();
         return new AgentRunException(phase, "Agent run failed during " + phase + ": " + detail,
-                cause, agentResult, executionDelta);
+                cause, agentResult, executionDelta, trace);
+    }
+
+    private void safelyFailTrace(RunTraceReference trace, AgentRunException failure,
+                                 AgentExecutionResult agentResult, ExecutionChangeReport delta) {
+        try {
+            runTraceService.fail(trace, failure.phase(), failure.getMessage(), agentResult, delta);
+        } catch (RuntimeException ignored) {
+            failure.addSuppressed(ignored);
+        }
     }
 }

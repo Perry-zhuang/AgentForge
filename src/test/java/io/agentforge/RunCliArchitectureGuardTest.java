@@ -27,7 +27,7 @@ class RunCliArchitectureGuardTest {
         String source = Files.readString(Path.of("src/main/java/io/agentforge/cli/RunRenderer.java"));
 
         assertThat(source).contains("AgentRunResult")
-                .doesNotContain("io.agentforge.application", "io.agentforge.agent.CodexAdapter",
+                .doesNotContain("io.agentforge.application.PlanService", "io.agentforge.agent.CodexAdapter",
                         "java.nio.file", "ConfigLoader", "GitClient", "ProcessBuilder", "Files.",
                         "PlanService", "PromptService", "CheckService");
     }

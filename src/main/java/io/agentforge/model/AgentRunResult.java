@@ -3,6 +3,7 @@ package io.agentforge.model;
 import io.agentforge.agent.AgentExecutionResult;
 import io.agentforge.agent.CodingAgentIdentity;
 import java.nio.file.Path;
+import io.agentforge.runtrace.RunTraceReference;
 
 /** Aggregate process, execution-delta, and boundary-verification results without conflating their statuses. */
 public record AgentRunResult(
@@ -15,8 +16,17 @@ public record AgentRunResult(
         AgentExecutionResult agentExecutionResult,
         ExecutionChangeReport executionChangeReport,
         VerificationReport verificationReport,
-        AgentRunStatus status
+        AgentRunStatus status,
+        RunTraceReference runTrace
 ) {
+    public AgentRunResult(Path repositoryRoot, String task, TaskType taskType, CodingAgentIdentity agent,
+                          EngineeringPlan plan, EngineeringPrompt prompt, AgentExecutionResult agentExecutionResult,
+                          ExecutionChangeReport executionChangeReport, VerificationReport verificationReport,
+                          AgentRunStatus status) {
+        this(repositoryRoot, task, taskType, agent, plan, prompt, agentExecutionResult, executionChangeReport,
+                verificationReport, status, null);
+    }
+
     public AgentRunResult {
         if (repositoryRoot == null || task == null || task.isBlank() || taskType == null || agent == null
                 || plan == null || prompt == null || agentExecutionResult == null || executionChangeReport == null
