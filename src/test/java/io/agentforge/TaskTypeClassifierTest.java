@@ -4,15 +4,71 @@ import static org.assertj.core.api.Assertions.assertThat;
 
 import io.agentforge.model.ClassificationSignal;
 import io.agentforge.model.MutationMode;
+import io.agentforge.model.RunPreflight;
 import io.agentforge.model.SecurityImpact;
 import io.agentforge.model.TaskClassification;
 import io.agentforge.model.TaskType;
 import io.agentforge.model.TaskTypeConfidence;
 import io.agentforge.planning.TaskTypeClassifier;
+import io.agentforge.planning.RunPreflightService;
 import org.junit.jupiter.api.Test;
 
 class TaskTypeClassifierTest {
     private final TaskTypeClassifier classifier = new TaskTypeClassifier();
+    private final RunPreflightService preflight = new RunPreflightService();
+
+    @Test
+    void pureRefactorPreservingBehavior() {
+        assertClassification("重构 AdminService 的代码结构，提取重复方法，保持现有业务行为不变",
+                TaskType.REFACTOR, TaskTypeConfidence.HIGH, MutationMode.SOURCE_WRITE, RunPreflight.Status.ALLOWED);
+        assertClassification("Refactor AdminService to remove duplicated code without changing behavior.",
+                TaskType.REFACTOR, TaskTypeConfidence.HIGH, MutationMode.SOURCE_WRITE, RunPreflight.Status.ALLOWED);
+    }
+
+    @Test
+    void refactorWithBehaviorChangeFailsClosed() {
+        assertFailsClosed("重构用户密码逻辑，把所有新用户默认密码改成 admin");
+        assertFailsClosed("Refactor the password logic so every new user uses admin as the default password.");
+    }
+
+    @Test
+    void pureBugfixWithDomainFeatureWordRemainsBugfix() {
+        assertClassification("修复 CalculatorService.add 加法计算错误", TaskType.BUGFIX,
+                TaskTypeConfidence.HIGH, MutationMode.SOURCE_WRITE, RunPreflight.Status.ALLOWED);
+        assertClassification("Fix the CalculatorService.add calculation bug.", TaskType.BUGFIX,
+                TaskTypeConfidence.HIGH, MutationMode.SOURCE_WRITE, RunPreflight.Status.ALLOWED);
+    }
+
+    @Test
+    void refactorBugfixConflictFailsClosed() {
+        assertFailsClosed("重构登录逻辑，修复 token 过期后仍然可以访问接口的问题");
+        assertFailsClosed("Refactor the login flow and fix expired tokens remaining valid.");
+    }
+
+    @Test
+    void refactorFeatureConflictFailsClosed() {
+        assertFailsClosed("重构用户接口，新增批量删除用户能力");
+    }
+
+    @Test
+    void ambiguousPasswordChangeFailsClosed() {
+        assertFailsClosed("修改用户密码逻辑，把默认密码改成 admin");
+    }
+
+    @Test
+    void explicitReadOnlyStillWins() {
+        assertClassification("分析如何修复 CMP 用户同步重复账号问题，只分析，不修改源码", TaskType.ANALYSIS,
+                TaskTypeConfidence.MEDIUM, MutationMode.READ_ONLY, RunPreflight.Status.ALLOWED);
+    }
+
+    @Test
+    void securityFactsRemainHighAfterConflict() {
+        TaskClassification result = classifier.classifyFacts(
+                "重构用户密码逻辑，把所有新用户默认密码改成 admin", null);
+        assertThat(result.securityImpact()).isEqualTo(SecurityImpact.HIGH);
+        assertThat(result.signals()).contains(ClassificationSignal.PASSWORD,
+                ClassificationSignal.PRIVILEGED_ACCOUNT, ClassificationSignal.BEHAVIOR_CHANGE);
+    }
 
     @Test
     void classifiesChineseEnglishAndMixedTasks() {
@@ -81,5 +137,19 @@ class TaskTypeClassifierTest {
         TaskClassification result = classifier.classifyFacts(task, null);
         assertThat(result.effectiveType()).as(task).isEqualTo(type);
         assertThat(result.mutationMode()).as(task).isEqualTo(mode);
+    }
+
+    private void assertClassification(String task, TaskType type, TaskTypeConfidence confidence,
+                                      MutationMode mode, RunPreflight.Status status) {
+        TaskClassification result = classifier.classifyFacts(task, null);
+        assertThat(result.effectiveType()).as(task).isEqualTo(type);
+        assertThat(result.typeConfidence()).as(task).isEqualTo(confidence);
+        assertThat(result.mutationMode()).as(task).isEqualTo(mode);
+        assertThat(preflight.evaluate(result).status()).as(task).isEqualTo(status);
+    }
+
+    private void assertFailsClosed(String task) {
+        assertClassification(task, TaskType.UNKNOWN, TaskTypeConfidence.LOW,
+                MutationMode.SOURCE_WRITE, RunPreflight.Status.BLOCKED);
     }
 }

@@ -30,7 +30,7 @@ public class TaskTypeClassifier {
             List.of("修复", "解决错误", "修正", "纠正", "报错", "异常", "故障", "不生效", "失败", "错误行为", "回归问题"),
             List.of("fix", "fixes", "fixed", "fixing", "bug", "repair", "resolve", "correct", "broken",
                     "failure", "fails", "error", "regression", "defect"));
-    private static final Terms FEATURE = terms(
+    private static final Terms FEATURE = actionTerms(
             List.of("新增", "增加", "添加", "实现", "新增功能", "新增接口", "新增能力", "提供功能", "扩展能力"),
             List.of("add", "adds", "added", "adding", "create", "creates", "created", "creating", "implement",
                     "implements", "implemented", "implementing", "introduce", "new feature", "new endpoint",
@@ -46,6 +46,9 @@ public class TaskTypeClassifier {
             List.of("重构", "抽取", "拆分", "整理代码结构", "收敛", "去重复", "解耦", "保持行为不变"),
             List.of("refactor", "refactors", "refactored", "refactoring", "extract", "restructure", "cleanup",
                     "clean up", "simplify", "consolidate", "decouple", "preserve behavior", "without behavior change"));
+    private static final Terms BEHAVIOR_CHANGE = terms(
+            List.of("改成", "改为", "变更为", "设置为", "默认密码"),
+            List.of("as the default", "default password", "so every", "so all"));
     private static final Terms SOURCE_WRITE = terms(
             List.of("新增", "增加", "添加", "实现", "修复", "修改", "更改", "重构", "接入", "集成", "删除", "替换", "升级"),
             List.of("add", "adds", "added", "adding", "create", "creates", "created", "creating", "implement",
@@ -76,6 +79,7 @@ public class TaskTypeClassifier {
         boolean feature = FEATURE.matches(normalized);
         boolean integration = INTEGRATION.matches(normalized);
         boolean refactor = REFACTOR.matches(normalized);
+        boolean behaviorChange = BEHAVIOR_CHANGE.matches(normalized);
         boolean featureSupport = FEATURE_SUPPORT.matches(normalized);
         boolean write = SOURCE_WRITE.matches(normalized);
         boolean password = PASSWORD.matches(normalized);
@@ -89,7 +93,7 @@ public class TaskTypeClassifier {
         boolean naturalFeature = !feature && api && featureSupport && batch && write;
         feature |= naturalFeature;
 
-        TaskType detected = resolve(readOnly, analysis, bugfix, feature, integration, refactor);
+        TaskType detected = resolve(readOnly, analysis, bugfix, feature, integration, refactor, behaviorChange);
         MutationMode mutation = readOnly ? MutationMode.READ_ONLY
                 : detected == TaskType.ANALYSIS ? MutationMode.READ_ONLY
                 : write || isWriteType(detected) ? MutationMode.SOURCE_WRITE : MutationMode.UNKNOWN;
@@ -105,6 +109,7 @@ public class TaskTypeClassifier {
         add(signals, featureSupport, ClassificationSignal.FEATURE_SUPPORT);
         add(signals, integration, ClassificationSignal.INTEGRATION);
         add(signals, refactor, ClassificationSignal.REFACTOR);
+        add(signals, behaviorChange, ClassificationSignal.BEHAVIOR_CHANGE);
         add(signals, readOnly, ClassificationSignal.EXPLICIT_READ_ONLY);
         add(signals, write, ClassificationSignal.SOURCE_WRITE);
         add(signals, api, ClassificationSignal.API_CHANGE);
@@ -119,8 +124,9 @@ public class TaskTypeClassifier {
     }
 
     private TaskType resolve(boolean readOnly, boolean analysis, boolean bugfix, boolean feature,
-                             boolean integration, boolean refactor) {
+                             boolean integration, boolean refactor, boolean behaviorChange) {
         if (readOnly && analysis) return TaskType.ANALYSIS;
+        if (refactor && behaviorChange) return TaskType.UNKNOWN;
         int writes = strongCount(bugfix, feature, integration, refactor);
         if (writes > 1) return TaskType.UNKNOWN;
         if (bugfix) return TaskType.BUGFIX;
@@ -148,6 +154,12 @@ public class TaskTypeClassifier {
     private static Terms terms(List<String> chinese, List<String> english) {
         return new Terms(chinese, english.stream().map(term -> Pattern.compile(
                 "(?<![A-Za-z0-9_])" + Pattern.quote(term) + "(?![A-Za-z0-9_])",
+                Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)).toList());
+    }
+
+    private static Terms actionTerms(List<String> chinese, List<String> english) {
+        return new Terms(chinese, english.stream().map(term -> Pattern.compile(
+                "(?<![A-Za-z0-9_.])" + Pattern.quote(term) + "(?![A-Za-z0-9_])",
                 Pattern.CASE_INSENSITIVE | Pattern.UNICODE_CASE)).toList());
     }
 

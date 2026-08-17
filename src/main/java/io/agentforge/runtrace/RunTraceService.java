@@ -8,12 +8,22 @@ import io.agentforge.model.AgentRunResult;
 import io.agentforge.model.EngineeringPlan;
 import io.agentforge.model.ExecutionBaseline;
 import io.agentforge.model.ExecutionChangeReport;
+import io.agentforge.discovery.DiscoveryEvidence;
+import io.agentforge.model.TaskSpec;
 
 public interface RunTraceService {
-    RunTraceReference prepare(AgentRunRequest request, EngineeringPlan plan, String renderedPrompt,
+    default RunTraceReference prepare(AgentRunRequest request, EngineeringPlan plan, String renderedPrompt,
+                                      ExecutionBaseline baseline, CodingAgentIdentity agent) {
+        return prepare(request, plan, new io.agentforge.intent.TaskSpecFactory().create(plan), renderedPrompt,
+                baseline, agent);
+    }
+
+    RunTraceReference prepare(AgentRunRequest request, EngineeringPlan plan, TaskSpec taskSpec, String renderedPrompt,
                               ExecutionBaseline baseline, CodingAgentIdentity agent);
 
     void persistAgentResult(RunTraceReference trace, AgentExecutionResult result);
+
+    default void persistDiscovery(RunTraceReference trace, DiscoveryEvidence evidence) {}
 
     RunTraceReference complete(RunTraceReference trace, AgentRunResult result);
 

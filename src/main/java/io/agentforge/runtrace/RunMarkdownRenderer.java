@@ -22,6 +22,11 @@ public class RunMarkdownRenderer {
                 .append("  \nSECONDARY: ").append(result.verificationReport().executionBoundary().secondaryPaths().size())
                 .append("  \nREFERENCE: ").append(result.verificationReport().executionBoundary().referencePaths().size())
                 .append("\n\n");
+        result.verificationReport().intentConsistency().ifPresent(consistency -> out
+                .append("## Task Intent\n\nGoal: ").append(consistency.taskSpec().goal())
+                .append("\n\nExpected Scopes: ").append(consistency.taskSpec().expectedChanges().size())
+                .append("\n\nForbidden Changes: ").append(consistency.taskSpec().forbiddenChanges().size())
+                .append("\n\n"));
         out.append("## Prompt Evidence\n\nPrompt File: `prompt.md`\n\nPrompt SHA-256: `")
                 .append(promptSha).append("`\n\n");
         out.append("## Agent Execution\n\nStatus: `").append(result.agentExecutionResult().status())
@@ -42,13 +47,17 @@ public class RunMarkdownRenderer {
                 .append("`  \nTask-Type: `").append(result.verificationReport().taskTypeStatus())
                 .append("`  \nArchitecture: `").append(result.verificationReport().executionBoundary().contractConfigured()
                         ? result.verificationReport().architectureStatus() : "NOT_CONFIGURED").append("`\n\n### Findings\n\n");
+        result.verificationReport().intentConsistency().ifPresent(consistency -> out
+                .append("Intent Consistency: `").append(consistency.status()).append("`  \n")
+                .append("Unexpected: ").append(consistency.unexpectedFiles().size()).append("  \n")
+                .append("Mismatches: ").append(consistency.violations().size()).append("\n\n"));
         if (result.verificationReport().findings().isEmpty()) out.append("None\n");
         for (VerificationFinding finding : result.verificationReport().findings()) {
             out.append("- `").append(finding.code()).append("` ").append(finding.path()).append(" — ")
                     .append(finding.message()).append("\n");
         }
         out.append("\n## Decision\n\n`AGENT RUN ").append(result.status()).append("`\n\n")
-                .append("## Evidence Files\n\n- `question.md`\n- `prompt.md`\n- `agent-output.md`\n")
+                .append("## Evidence Files\n\n- `question.md`\n- `task-spec.json`\n- `prompt.md`\n- `agent-output.md`\n")
                 .append("- `agent-stderr.log`\n- `run.json`\n");
         return out.toString().replace("\r\n", "\n");
     }

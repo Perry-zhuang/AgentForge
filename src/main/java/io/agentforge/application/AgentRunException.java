@@ -52,6 +52,7 @@ public final class AgentRunException extends RuntimeException {
     public enum Phase {
         REPOSITORY_VALIDATION,
         PLAN,
+        DISCOVERY,
         PROMPT,
         BASELINE_CAPTURE,
         ADAPTER_RESOLUTION,

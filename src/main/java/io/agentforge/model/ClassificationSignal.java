@@ -7,6 +7,7 @@ public enum ClassificationSignal {
     FEATURE_SUPPORT,
     INTEGRATION,
     REFACTOR,
+    BEHAVIOR_CHANGE,
     EXPLICIT_READ_ONLY,
     SOURCE_WRITE,
     API_CHANGE,

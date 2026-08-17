@@ -19,6 +19,8 @@ import io.agentforge.scanner.ArchitectureScanner;
 import io.agentforge.scanner.RepositoryScanner;
 import io.agentforge.verification.CheckEngine;
 import io.agentforge.verification.ExecutionArchitectureAttributor;
+import io.agentforge.intent.IntentDeltaConsistencyCheck;
+import io.agentforge.model.TaskSpec;
 import java.nio.file.Path;
 import java.util.List;
 import java.util.Map;
@@ -35,12 +37,14 @@ public class CheckService {
     private final PolicyEngine policyEngine;
     private final ExecutionArchitectureAttributor architectureAttributor;
     private final CheckEngine checkEngine;
+    private final IntentDeltaConsistencyCheck consistencyCheck;
 
     public CheckService(PlanService planService, DiffAuditService diffAuditService,
                         ExecutionBaselineService executionBaselineService,
                         RepositoryScanner repositoryScanner, ArchitectureScanner architectureScanner,
                         PolicyEngine policyEngine,
-                        ExecutionArchitectureAttributor architectureAttributor, CheckEngine checkEngine) {
+                        ExecutionArchitectureAttributor architectureAttributor, CheckEngine checkEngine,
+                        IntentDeltaConsistencyCheck consistencyCheck) {
         this.planService = planService;
         this.diffAuditService = diffAuditService;
         this.executionBaselineService = executionBaselineService;
@@ -49,6 +53,16 @@ public class CheckService {
         this.policyEngine = policyEngine;
         this.architectureAttributor = architectureAttributor;
         this.checkEngine = checkEngine;
+        this.consistencyCheck = consistencyCheck;
+    }
+
+    public CheckService(PlanService planService, DiffAuditService diffAuditService,
+                        ExecutionBaselineService executionBaselineService,
+                        RepositoryScanner repositoryScanner, ArchitectureScanner architectureScanner,
+                        PolicyEngine policyEngine, ExecutionArchitectureAttributor architectureAttributor,
+                        CheckEngine checkEngine) {
+        this(planService, diffAuditService, executionBaselineService, repositoryScanner, architectureScanner,
+                policyEngine, architectureAttributor, checkEngine, new IntentDeltaConsistencyCheck());
     }
 
     public VerificationReport check(VerificationRequest request) {
@@ -65,6 +79,11 @@ public class CheckService {
     }
 
     public VerificationReport checkExecution(ExecutionBaselineService.ComparisonResult comparison) {
+        return checkExecution(comparison, null);
+    }
+
+    public VerificationReport checkExecution(ExecutionBaselineService.ComparisonResult comparison,
+                                              TaskSpec taskSpec) {
         if (comparison == null) throw new IllegalArgumentException("Execution comparison is required");
         EngineeringBoundarySnapshot boundary = comparison.boundary();
         ExecutionChangeReport execution = comparison.execution();
@@ -76,7 +95,9 @@ public class CheckService {
         VerificationChangeSet facts = VerificationChangeSet.executionDelta(
                 repositoryInfo(comparison.currentSnapshot()), execution, policy, architecture.report(),
                 boundary.defaultPolicyUsed(), architecture.limitations());
-        return checkEngine.verify(boundary, facts);
+        VerificationReport scopeVerification = checkEngine.verify(boundary, facts);
+        return taskSpec == null ? scopeVerification : scopeVerification.withIntentConsistency(
+                consistencyCheck.check(taskSpec, execution, scopeVerification));
     }
 
     private ArchitectureReport currentArchitecture(EngineeringBoundarySnapshot boundary,

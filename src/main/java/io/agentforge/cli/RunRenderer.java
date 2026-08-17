@@ -36,6 +36,13 @@ public class RunRenderer {
         row(out, "SECONDARY", result.verificationReport().executionBoundary().secondaryPaths().size());
         row(out, "REFERENCE", result.verificationReport().executionBoundary().referencePaths().size());
 
+        result.verificationReport().intentConsistency().ifPresent(consistency -> {
+            section(out, "Task Intent");
+            row(out, "Goal", consistency.taskSpec().goal());
+            row(out, "Expected Scopes", consistency.taskSpec().expectedChanges().size());
+            row(out, "Forbidden Changes", consistency.taskSpec().forbiddenChanges().size());
+        });
+
         section(out, "Agent Execution");
         row(out, "Status", result.agentExecutionResult().status());
         row(out, "Exit Code", result.agentExecutionResult().processExitCode() == null
@@ -65,6 +72,14 @@ public class RunRenderer {
         row(out, "Task-Type", result.verificationReport().taskTypeStatus());
         row(out, "Architecture", result.verificationReport().executionBoundary().contractConfigured()
                 ? result.verificationReport().architectureStatus() : "NOT CONFIGURED");
+        result.verificationReport().intentConsistency().ifPresent(consistency -> {
+            section(out, "Intent / Delta Consistency");
+            row(out, "Expected", consistency.taskSpec().expectedChanges().size());
+            row(out, "Actual", consistency.actualChangedFiles());
+            row(out, "Unexpected", consistency.unexpectedFiles().size());
+            row(out, "Mismatches", consistency.violations().size());
+            row(out, "Result", consistency.status());
+        });
 
         section(out, "Findings");
         if (result.verificationReport().findings().isEmpty()) {

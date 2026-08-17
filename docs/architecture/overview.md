@@ -373,3 +373,54 @@ P3 adds no real Codex end-to-end acceptance test. Automated root-command tests u
 deterministic fake adapter over temporary Git repositories. Model selection, sandbox/approval ownership, login and API
 keys, sessions, resume, retry, rollback, auto-commit, parallel execution, additional agents, and business-correctness
 decisions remain outside this phase.
+
+## V0.4 Intent-to-Delta Consistency MVP
+
+After Discovery produces the final pre-execution plan, `TaskSpecFactory` deterministically freezes a minimal intent
+contract before Prompt rendering, baseline capture, trace preparation, or mutation. The contract preserves the original
+task, effective task type, goal, ordered expected path semantics, forbidden-change statements, and existing acceptance
+criteria. PRIMARY and SECONDARY relevance becomes `ANY_ALLOWED_CHANGE`; it is never promoted to mandatory `MODIFY`.
+REFERENCE paths and every known scope path for READ_ONLY work become `NO_CHANGE`.
+
+```text
+final pre-execution EngineeringPlan
+    -> TaskSpecFactory
+        -> frozen TaskSpec
+    -> existing Prompt + schema-2 boundary baseline
+    -> Agent
+    -> existing execution-only delta
+    -> existing Scope Validation
+    -> IntentDeltaConsistencyCheck(TaskSpec, delta, scope result)
+    -> VerificationReport + Run Trace + CLI
+```
+
+`IntentDeltaConsistencyCheck` is a pure comparison boundary. It supports `MODIFY`, `CREATE`, `DELETE`, `NO_CHANGE`,
+and `ANY_ALLOWED_CHANGE`, indexes rename old and new paths as one execution change, and consumes only the attributed
+execution delta so historical dirty files remain excluded. Outside-boundary detection is reused from Scope Validation
+instead of being reimplemented. Intent status remains independent from Scope status, then participates in the existing
+overall PASS/WARNING/FAIL decision.
+
+The local Run Trace writes `task-spec.json` before agent execution and adds the complete TaskSpec plus consistency
+status, unexpected files, and violations to `run.json`. Existing repository snapshot schema 1 and task-aware baseline
+schema 2 remain unchanged; no timestamp, UUID, filesystem traversal order, or agent output participates in TaskSpec or
+consistency semantics.
+
+## V0.3.3 Discovery Before Mutation MVP
+
+`inspect` remains a deterministic Repository Evidence Pre-scan: it provides starting files, modules, lightweight flows,
+policy facts, and risk hints, but does not claim complete semantic scope. After classification and preflight, a pure
+`DiscoveryTrigger` chooses only `REQUIRED` or `SKIPPED`. Simple, low-security, high-confidence, clean, single-module
+tasks retain the one-invocation mutation fast path.
+
+Required discovery reuses the agent-neutral `CodingAgentAdapter.execute` boundary with a strict READ_ONLY prompt. A
+repository snapshot is captured before discovery and compared afterward with the existing `BaselineComparator`; any
+discovery delta stops before mutation. Strict JSON is parsed fail-closed and a deterministic validator rejects unknown,
+protected, denied, dirty-overlap, oversized, unevidenced, escaping, duplicate, or nonexistent scope paths. Only approved
+PRIMARY paths become writable; discovery SECONDARY and REFERENCE paths are frozen as read-only references.
+
+The mutation baseline is captured after approved discovery and must equal the verified post-discovery repository state,
+preventing stale discovery evidence from authorizing mutation after an intervening repository change. Mutation then
+continues through the existing execution delta and frozen-boundary Check without after-state planning or inspection.
+Discovery evidence upgrades participating run manifests to schema 2 and stores separate decision, prompt, raw output,
+stderr, parsed result, and validation artifacts. Discovery improves scope evidence; it does not assert implementation or
+business correctness and does not implement retries, caching, manual review, new-file proposals, or Engineering Verdict.

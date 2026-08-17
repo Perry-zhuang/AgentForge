@@ -1,6 +1,7 @@
 package io.agentforge.model;
 
 import java.util.List;
+import java.util.Optional;
 
 public record VerificationReport(
         EngineeringPlan plan,
@@ -14,7 +15,8 @@ public record VerificationReport(
         VerificationStatus overallStatus,
         List<VerificationFinding> findings,
         List<String> limitations,
-        VerificationChangeSet changeSet
+        VerificationChangeSet changeSet,
+        Optional<IntentConsistencyReport> intentConsistency
 ) {
     public VerificationReport(
             EngineeringPlan plan,
@@ -29,13 +31,24 @@ public record VerificationReport(
             List<String> limitations
     ) {
         this(plan, null, diffAudit, baseline, scopeStatus, policyStatus, taskTypeStatus, architectureStatus,
-                overallStatus, findings, limitations, VerificationChangeSet.currentWorkingTree(diffAudit));
+                overallStatus, findings, limitations, VerificationChangeSet.currentWorkingTree(diffAudit),
+                Optional.empty());
+    }
+
+    public VerificationReport(EngineeringPlan plan, EngineeringBoundarySnapshot executionBoundary,
+                              DiffAuditReport diffAudit, Baseline baseline, VerificationStatus scopeStatus,
+                              VerificationStatus policyStatus, VerificationStatus taskTypeStatus,
+                              VerificationStatus architectureStatus, VerificationStatus overallStatus,
+                              List<VerificationFinding> findings, List<String> limitations,
+                              VerificationChangeSet changeSet) {
+        this(plan, executionBoundary, diffAudit, baseline, scopeStatus, policyStatus, taskTypeStatus,
+                architectureStatus, overallStatus, findings, limitations, changeSet, Optional.empty());
     }
 
     public VerificationReport {
         if (baseline == null || scopeStatus == null
                 || policyStatus == null || taskTypeStatus == null || architectureStatus == null
-                || overallStatus == null || changeSet == null) {
+                || overallStatus == null || changeSet == null || intentConsistency == null) {
             throw new IllegalArgumentException("Verification report fields are required");
         }
         if (baseline != changeSet.baseline()) {
@@ -55,6 +68,14 @@ public record VerificationReport(
         }
         findings = List.copyOf(findings);
         limitations = List.copyOf(limitations);
+    }
+
+    public VerificationReport withIntentConsistency(IntentConsistencyReport consistency) {
+        VerificationStatus combined = overallStatus == VerificationStatus.FAIL
+                || consistency.status() == VerificationStatus.FAIL ? VerificationStatus.FAIL : overallStatus;
+        return new VerificationReport(plan, executionBoundary, diffAudit, baseline, scopeStatus, policyStatus,
+                taskTypeStatus, architectureStatus, combined, findings, limitations, changeSet,
+                Optional.of(consistency));
     }
 
     public enum Baseline {

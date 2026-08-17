@@ -2,10 +2,10 @@ package io.agentforge.policy;
 
 import java.util.regex.Pattern;
 
-final class PathPolicyMatcher {
+public final class PathPolicyMatcher {
     private PathPolicyMatcher() {}
 
-    static boolean matches(String pattern, String path) {
+    public static boolean matches(String pattern, String path) {
         String normalizedPattern = pattern.replace('\\', '/');
         String normalizedPath = path.replace('\\', '/');
         if (!normalizedPattern.contains("/")) {

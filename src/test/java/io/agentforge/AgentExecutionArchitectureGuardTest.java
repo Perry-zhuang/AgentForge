@@ -30,10 +30,12 @@ class AgentExecutionArchitectureGuardTest {
 
         assertThat(List.of(
                 source.indexOf("planService.plan"),
+                source.indexOf("agentRegistry.resolve"),
+                source.indexOf("discoveryCoordinator.discover"),
                 source.indexOf("promptService.fromPlan"),
                 source.indexOf("promptRenderer.render"),
                 source.indexOf("executionBaselineService.capture"),
-                source.indexOf("agentRegistry.resolve"),
+                source.indexOf("runTraceService.persistDiscovery"),
                 source.indexOf("adapter.execute"),
                 source.indexOf("executionBaselineService.compare"),
                 source.indexOf("checkService.checkExecution")))

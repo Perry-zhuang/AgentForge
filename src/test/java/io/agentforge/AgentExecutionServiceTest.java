@@ -3,9 +3,11 @@ package io.agentforge;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.verifyNoMoreInteractions;
@@ -68,6 +70,11 @@ import org.mockito.InOrder;
 import org.mockito.ArgumentCaptor;
 import io.agentforge.runtrace.RunTraceReference;
 import io.agentforge.runtrace.RunTraceService;
+import io.agentforge.discovery.DiscoveryCoordinator;
+import io.agentforge.discovery.DiscoveryDecision;
+import io.agentforge.discovery.DiscoveryEvidence;
+import io.agentforge.discovery.DiscoveryException;
+import io.agentforge.discovery.DiscoveryOutcome;
 
 class AgentExecutionServiceTest {
     private static final CodingAgentIdentity CODEX = new CodingAgentIdentity(CodingAgentType.CODEX, "codex",
@@ -75,6 +82,64 @@ class AgentExecutionServiceTest {
 
     @TempDir
     Path repository;
+
+    @Test
+    void fastPathInvokesOnlyMutationAgent() {
+        Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
+        fixture.service.execute(request());
+        verify(fixture.adapter, times(1)).execute(any());
+    }
+
+    @Test
+    void controlledPathInvokesDiscoveryThenMutation() {
+        Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
+        DiscoveryCoordinator controlled = (plan, request, adapter, agent) -> {
+            adapter.execute(new AgentExecutionRequest(agent, canonicalRepository(), "discovery prompt",
+                    request.timeout(), request.environmentOverrides()));
+            return new DiscoveryOutcome(plan, DiscoveryEvidence.skipped(new DiscoveryDecision(
+                    DiscoveryDecision.Status.REQUIRED, List.of(DiscoveryDecision.Reason.HIGH_SECURITY))), null);
+        };
+        AgentExecutionService service = new AgentExecutionService(fixture.planService, fixture.promptService,
+                fixture.renderer, fixture.baselineService, fixture.registry, fixture.checkService,
+                fixture.runTraceService, controlled);
+        service.execute(request());
+        verify(fixture.adapter, times(2)).execute(any());
+    }
+
+    @Test
+    void invalidDiscoveryStopsBeforeMutation() {
+        Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
+        DiscoveryCoordinator failing = (plan, request, adapter, agent) -> {
+            adapter.execute(new AgentExecutionRequest(agent, canonicalRepository(), "discovery prompt",
+                    request.timeout(), request.environmentOverrides()));
+            throw new DiscoveryException("invalid JSON");
+        };
+        AgentExecutionService service = new AgentExecutionService(fixture.planService, fixture.promptService,
+                fixture.renderer, fixture.baselineService, fixture.registry, fixture.checkService,
+                fixture.runTraceService, failing);
+        assertThatThrownBy(() -> service.execute(request())).isInstanceOfSatisfying(AgentRunException.class,
+                exception -> assertThat(exception.phase()).isEqualTo(AgentRunException.Phase.DISCOVERY));
+        verify(fixture.adapter, times(1)).execute(any());
+        verifyNoInteractions(fixture.promptService, fixture.baselineService, fixture.checkService,
+                fixture.runTraceService);
+    }
+
+    @Test
+    void repositoryStateChangeAfterDiscoveryStopsMutation() {
+        Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
+        RepositorySnapshot changed = new RepositorySnapshot(RepositorySnapshot.CURRENT_SCHEMA_VERSION,
+                canonicalRepository().toString(), "main", "different-head", List.of());
+        DiscoveryCoordinator stale = (plan, request, adapter, agent) -> new DiscoveryOutcome(plan,
+                DiscoveryEvidence.skipped(new DiscoveryDecision(DiscoveryDecision.Status.REQUIRED,
+                        List.of(DiscoveryDecision.Reason.HIGH_SECURITY))), changed);
+        AgentExecutionService service = new AgentExecutionService(fixture.planService, fixture.promptService,
+                fixture.renderer, fixture.baselineService, fixture.registry, fixture.checkService,
+                fixture.runTraceService, stale);
+        assertThatThrownBy(() -> service.execute(request())).isInstanceOfSatisfying(AgentRunException.class,
+                exception -> assertThat(exception.phase()).isEqualTo(AgentRunException.Phase.DISCOVERY));
+        verify(fixture.adapter, never()).execute(any());
+        verifyNoInteractions(fixture.checkService, fixture.runTraceService);
+    }
 
     @Test
     void executesTheFrozenLifecycleInOrderWithOnePlanPromptBaselineAndAdapterCall() {
@@ -86,15 +151,15 @@ class AgentExecutionServiceTest {
         InOrder order = inOrder(fixture.planService, fixture.promptService, fixture.renderer,
                 fixture.baselineService, fixture.registry, fixture.adapter, fixture.checkService);
         order.verify(fixture.planService).plan(new EngineeringPlanRequest(canonicalRepository(), request.task()));
+        order.verify(fixture.registry).resolve(CodingAgentType.CODEX);
+        order.verify(fixture.adapter).identity();
         order.verify(fixture.promptService).fromPlan(fixture.plan);
         order.verify(fixture.renderer).render(fixture.prompt);
         order.verify(fixture.baselineService).capture(fixture.plan);
-        order.verify(fixture.registry).resolve(CodingAgentType.CODEX);
-        order.verify(fixture.adapter).identity();
         ArgumentCaptor<AgentExecutionRequest> executionRequest = ArgumentCaptor.forClass(AgentExecutionRequest.class);
         order.verify(fixture.adapter).execute(executionRequest.capture());
         order.verify(fixture.baselineService).compare(canonicalRepository(), request.task(), fixture.baseline);
-        order.verify(fixture.checkService).checkExecution(fixture.comparison);
+        order.verify(fixture.checkService).checkExecution(eq(fixture.comparison), any());
         verifyNoMoreInteractions(fixture.planService, fixture.promptService, fixture.renderer, fixture.registry,
                 fixture.adapter, fixture.checkService);
 
@@ -124,7 +189,7 @@ class AgentExecutionServiceTest {
         assertThat(result.verificationReport().findings()).extracting(VerificationFinding::code)
                 .containsExactly("OUT_OF_SCOPE_MODIFICATION");
         verify(fixture.baselineService).compare(canonicalRepository(), request().task(), fixture.baseline);
-        verify(fixture.checkService).checkExecution(fixture.comparison);
+        verify(fixture.checkService).checkExecution(eq(fixture.comparison), any());
         verify(fixture.adapter).execute(any());
     }
 
@@ -139,7 +204,7 @@ class AgentExecutionServiceTest {
     }
 
     @Test
-    void promptFailureStopsBeforeBaselineAndAdapter() {
+    void promptFailureStopsBeforeBaselineAndAdapterInvocation() {
         Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
         when(fixture.promptService.fromPlan(fixture.plan)).thenThrow(new IllegalStateException("prompt failed"));
 
@@ -150,11 +215,14 @@ class AgentExecutionServiceTest {
                 });
 
         verify(fixture.baselineService, never()).capture(any(EngineeringPlan.class));
-        verifyNoInteractions(fixture.registry, fixture.adapter, fixture.checkService);
+        verify(fixture.registry).resolve(CodingAgentType.CODEX);
+        verify(fixture.adapter).identity();
+        verify(fixture.adapter, never()).execute(any());
+        verifyNoInteractions(fixture.checkService);
     }
 
     @Test
-    void baselineFailureStopsBeforeAdapterResolution() {
+    void baselineFailureStopsBeforeAdapterInvocation() {
         Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
         when(fixture.baselineService.capture(fixture.plan)).thenThrow(new IllegalStateException("baseline failed"));
 
@@ -162,7 +230,10 @@ class AgentExecutionServiceTest {
                 .isInstanceOfSatisfying(AgentRunException.class,
                         exception -> assertThat(exception.phase()).isEqualTo(AgentRunException.Phase.BASELINE_CAPTURE));
 
-        verifyNoInteractions(fixture.registry, fixture.adapter, fixture.checkService);
+        verify(fixture.registry).resolve(CodingAgentType.CODEX);
+        verify(fixture.adapter).identity();
+        verify(fixture.adapter, never()).execute(any());
+        verifyNoInteractions(fixture.checkService);
     }
 
     @Test
@@ -191,7 +262,7 @@ class AgentExecutionServiceTest {
     @Test
     void tracePreparationFailureStopsBeforeAdapterInvocation() {
         Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
-        when(fixture.runTraceService.prepare(any(), any(), any(), any(), any()))
+        when(fixture.runTraceService.prepare(any(), any(), any(), any(), any(), any()))
                 .thenThrow(new IllegalStateException("archive unavailable"));
 
         assertThatThrownBy(() -> fixture.service.execute(request()))
@@ -221,7 +292,7 @@ class AgentExecutionServiceTest {
     @Test
     void verificationInfrastructureFailureRetainsProcessAndDeltaFacts() {
         Fixture fixture = fixture(AgentExecutionStatus.SUCCESS, VerificationStatus.PASS);
-        when(fixture.checkService.checkExecution(fixture.comparison))
+        when(fixture.checkService.checkExecution(eq(fixture.comparison), any()))
                 .thenThrow(new IllegalStateException("check unavailable"));
 
         assertThatThrownBy(() -> fixture.service.execute(request()))
@@ -256,7 +327,7 @@ class AgentExecutionServiceTest {
         assertThat(result.status()).isEqualTo(expected);
         assertThat(result.verificationReport().overallStatus()).isEqualTo(verification);
         verify(fixture.baselineService).compare(canonicalRepository(), request().task(), fixture.baseline);
-        verify(fixture.checkService).checkExecution(fixture.comparison);
+        verify(fixture.checkService).checkExecution(eq(fixture.comparison), any());
     }
 
     private AgentRunRequest request() {
@@ -300,10 +371,10 @@ class AgentExecutionServiceTest {
         when(adapter.execute(any())).thenReturn(agentResult);
         RunTraceReference trace = new RunTraceReference("test-run", Path.of("/tmp/test-run"),
                 Path.of("/tmp/test-run/report.md"), null);
-        when(runTraceService.prepare(any(), any(), any(), any(), any())).thenReturn(trace);
+        when(runTraceService.prepare(any(), any(), any(), any(), any(), any())).thenReturn(trace);
         when(runTraceService.complete(any(), any())).thenReturn(trace);
         when(baselineService.compare(root, plan.task(), baseline)).thenReturn(comparison);
-        when(checkService.checkExecution(comparison)).thenReturn(verification);
+        when(checkService.checkExecution(eq(comparison), any())).thenReturn(verification);
         AgentExecutionService service = new AgentExecutionService(planService, promptService, renderer,
                 baselineService, registry, checkService, runTraceService);
         return new Fixture(service, planService, promptService, renderer, baselineService, registry, adapter,

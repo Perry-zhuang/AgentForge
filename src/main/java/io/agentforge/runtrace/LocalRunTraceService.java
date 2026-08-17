@@ -11,6 +11,9 @@ import io.agentforge.model.EngineeringPlan;
 import io.agentforge.model.ExecutionBaseline;
 import io.agentforge.model.ExecutionChangeReport;
 import io.agentforge.model.VerificationFinding;
+import io.agentforge.discovery.DiscoveryEvidence;
+import io.agentforge.discovery.DiscoveryDecision;
+import io.agentforge.model.TaskSpec;
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.AtomicMoveNotSupportedException;
@@ -68,6 +71,15 @@ public class LocalRunTraceService implements RunTraceService {
     @Override
     public RunTraceReference prepare(AgentRunRequest request, EngineeringPlan plan, String renderedPrompt,
                                      ExecutionBaseline baseline, CodingAgentIdentity agent) {
+        TaskSpec compatible = new TaskSpec("legacy-trace", request.task(), plan.taskType(), request.task(),
+                List.of(), List.of(), List.of());
+        return prepare(request, plan, compatible, renderedPrompt, baseline, agent);
+    }
+
+    @Override
+    public RunTraceReference prepare(AgentRunRequest request, EngineeringPlan plan, TaskSpec taskSpec,
+                                     String renderedPrompt,
+                                     ExecutionBaseline baseline, CodingAgentIdentity agent) {
         try {
             Path repository = plan.repository().repository().path().toRealPath();
             Path safeRoot = safeFuturePath(archiveRoot);
@@ -79,10 +91,11 @@ public class LocalRunTraceService implements RunTraceService {
             createPrivateDirectories(directory);
             RunTraceReference reference = new RunTraceReference(runId, directory,
                     directory.resolve("report.md"), output);
-            Context context = new Context(request, plan, baseline, agent, renderedPrompt, started, output);
+            Context context = new Context(request, plan, taskSpec, baseline, agent, renderedPrompt, started, output);
             contexts.put(directory, context);
             writeStructured(directory.resolve("question.md"), question(context));
             writeRaw(directory.resolve("prompt.md"), renderedPrompt);
+            writeStructured(directory.resolve("task-spec.json"), taskSpec);
             writeStructured(directory.resolve("run.json"), manifest(reference, context, null, null,
                     null, "IN_PROGRESS", null, null));
             return reference;
@@ -99,6 +112,24 @@ public class LocalRunTraceService implements RunTraceService {
         context.agentResult = result;
         writeStructured(trace.archiveDirectory().resolve("run.json"), manifest(trace, context, result, null,
                 null, "IN_PROGRESS", null, null));
+    }
+
+    @Override
+    public void persistDiscovery(RunTraceReference trace, DiscoveryEvidence evidence) {
+        Context context = requireContext(trace);
+        context.discovery = evidence;
+        writeStructured(trace.archiveDirectory().resolve("discovery-decision.json"), ordered(
+                "status", evidence.decision().status().name(),
+                "reasons", evidence.decision().reasons().stream().map(Enum::name).toList()));
+        if (evidence.decision().status() == DiscoveryDecision.Status.REQUIRED) {
+            writeRaw(trace.archiveDirectory().resolve("discovery-prompt.md"), evidence.prompt());
+            writeRaw(trace.archiveDirectory().resolve("discovery-output.json"), evidence.rawResult());
+            writeRaw(trace.archiveDirectory().resolve("discovery-stderr.log"), evidence.agentResult().stderr());
+            if (evidence.result() != null) writeStructured(trace.archiveDirectory().resolve("discovery-result.json"), evidence.result());
+            if (evidence.validation() != null) writeStructured(trace.archiveDirectory().resolve("discovery-validation.json"), evidence.validation());
+        }
+        writeStructured(trace.archiveDirectory().resolve("run.json"), manifest(trace, context,
+                context.agentResult, null, null, "IN_PROGRESS", null, null));
     }
 
     @Override
@@ -139,7 +170,7 @@ public class LocalRunTraceService implements RunTraceService {
                                          ExecutionChangeReport delta, AgentRunResult result, String lifecycle,
                                          String failureStage, String failureMessage) {
         Map<String, Object> root = new LinkedHashMap<>();
-        root.put("schemaVersion", 1);
+        root.put("schemaVersion", context.discovery == null ? 1 : 2);
         root.put("runId", trace.runId());
         root.put("startedAt", context.started.toString());
         root.put("completedAt", lifecycle.equals("IN_PROGRESS") ? null : clock.instant().toString());
@@ -156,8 +187,14 @@ public class LocalRunTraceService implements RunTraceService {
                 "securityImpact", classification.securityImpact().name(),
                 "classificationSource", classification.source().name(),
                 "signals", classification.signals().stream().map(Enum::name).toList()));
+        root.put("taskSpec", ordered("file", "task-spec.json", "taskId", context.taskSpec.taskId(),
+                "originalTask", context.taskSpec.originalTask(), "taskType", context.taskSpec.taskType().name(),
+                "goal", context.taskSpec.goal(), "expectedChanges", context.taskSpec.expectedChanges(),
+                "forbiddenChanges", context.taskSpec.forbiddenChanges(),
+                "acceptanceCriteria", context.taskSpec.acceptanceCriteria()));
         root.put("agent", ordered("type", context.agent.type().name(), "id", context.agent.id()));
         root.put("prompt", ordered("file", "prompt.md", "sha256", sha(context.renderedPrompt)));
+        root.put("discovery", discovery(context.discovery));
         root.put("execution", execution == null ? null : ordered("status", execution.status().name(),
                 "exitCode", execution.processExitCode(), "stdoutFile", "agent-output.md",
                 "stdoutSha256", sha(execution.stdout()), "stderrFile", "agent-stderr.log",
@@ -172,11 +209,37 @@ public class LocalRunTraceService implements RunTraceService {
                 result.verificationReport().taskTypeStatus().name(), "architecture",
                 result.verificationReport().executionBoundary().contractConfigured()
                         ? result.verificationReport().architectureStatus().name() : "NOT_CONFIGURED",
+                "intentConsistency", result.verificationReport().intentConsistency().map(consistency -> ordered(
+                        "status", consistency.status().name(), "expectedScopes",
+                        consistency.taskSpec().expectedChanges().size(), "actualChangedFiles",
+                        consistency.actualChangedFiles(), "unexpectedFiles", consistency.unexpectedFiles(),
+                        "violations", consistency.violations())).orElse(null),
                 "findings", result.verificationReport().findings().stream().map(this::finding).toList()));
         root.put("decision", result == null ? null : result.status().name());
         root.put("lifecycle", ordered("status", lifecycle, "failureStage", failureStage,
                 "failureMessage", failureMessage));
         return root;
+    }
+
+    private Object discovery(DiscoveryEvidence evidence) {
+        if (evidence == null) return null;
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("status", evidence.decision().status().name());
+        result.put("reasons", evidence.decision().reasons().stream().map(Enum::name).toList());
+        result.put("decisionFile", "discovery-decision.json");
+        if (evidence.decision().status() == DiscoveryDecision.Status.REQUIRED) {
+            result.put("promptFile", "discovery-prompt.md");
+            result.put("promptSha256", sha(evidence.prompt()));
+            result.put("outputFile", "discovery-output.json");
+            result.put("outputSha256", sha(evidence.rawResult()));
+            result.put("stderrFile", "discovery-stderr.log");
+            result.put("stderrSha256", sha(evidence.agentResult().stderr()));
+            result.put("resultFile", evidence.result() == null ? null : "discovery-result.json");
+            result.put("validationFile", evidence.validation() == null ? null : "discovery-validation.json");
+            result.put("deltaFiles", evidence.delta().changes().size());
+            result.put("validation", evidence.validation() == null ? null : evidence.validation().status().name());
+        }
+        return result;
     }
 
     private Map<String, Object> finding(VerificationFinding finding) {
@@ -306,17 +369,21 @@ public class LocalRunTraceService implements RunTraceService {
     private static final class Context {
         private final AgentRunRequest request;
         private final EngineeringPlan plan;
+        private final TaskSpec taskSpec;
         private final ExecutionBaseline baseline;
         private final CodingAgentIdentity agent;
         private final String renderedPrompt;
         private final Instant started;
         private final Path output;
         private AgentExecutionResult agentResult;
+        private DiscoveryEvidence discovery;
 
-        private Context(AgentRunRequest request, EngineeringPlan plan, ExecutionBaseline baseline,
+        private Context(AgentRunRequest request, EngineeringPlan plan, TaskSpec taskSpec,
+                        ExecutionBaseline baseline,
                         CodingAgentIdentity agent, String renderedPrompt, Instant started, Path output) {
             this.request = request;
             this.plan = plan;
+            this.taskSpec = taskSpec;
             this.baseline = baseline;
             this.agent = agent;
             this.renderedPrompt = renderedPrompt;

@@ -25,6 +25,8 @@ import io.agentforge.model.RepositorySnapshot;
 import io.agentforge.model.TaskType;
 import io.agentforge.model.VerificationReport;
 import io.agentforge.model.VerificationStatus;
+import io.agentforge.discovery.DiscoveryDecision;
+import io.agentforge.discovery.DiscoveryEvidence;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -42,6 +44,23 @@ import org.junit.jupiter.api.io.TempDir;
 
 class LocalRunTraceServiceTest {
     @TempDir Path temp;
+
+    @Test
+    void discoveryEvidenceUpgradesManifestToSchemaTwoWithoutChangingExistingArtifacts() throws Exception {
+        Path repository = Files.createDirectory(temp.resolve("discovery-repo")).toRealPath();
+        Fixture fixture = fixture(repository, null);
+        AgentRunRequest request = new AgentRunRequest(repository, "修复问题", CodingAgentType.CODEX,
+                Duration.ofSeconds(5), Map.of());
+        RunTraceReference trace = fixture.service.prepare(request, fixture.plan, "mutation prompt",
+                fixture.baseline, fixture.identity);
+        fixture.service.persistDiscovery(trace, DiscoveryEvidence.skipped(DiscoveryDecision.skipped()));
+
+        JsonNode json = new ObjectMapper().readTree(trace.archiveDirectory().resolve("run.json").toFile());
+        assertThat(json.path("schemaVersion").asInt()).isEqualTo(2);
+        assertThat(json.path("discovery").path("status").asText()).isEqualTo("SKIPPED");
+        assertThat(trace.archiveDirectory().resolve("discovery-decision.json")).exists();
+        assertThat(trace.archiveDirectory().resolve("prompt.md")).exists();
+    }
 
     @Test
     void archivesExactQuestionPromptStreamsHashesCompleteManifestReportAndExport() throws Exception {
@@ -65,6 +84,7 @@ class LocalRunTraceServiceTest {
         assertThat(Files.readString(trace.archiveDirectory().resolve("question.md"))).contains(task);
         assertThat(Files.readAllBytes(trace.archiveDirectory().resolve("prompt.md")))
                 .isEqualTo(prompt.getBytes(StandardCharsets.UTF_8));
+        assertThat(trace.archiveDirectory().resolve("task-spec.json")).exists();
         assertThat(Files.readAllBytes(trace.archiveDirectory().resolve("agent-output.md")))
                 .isEqualTo(execution.stdout().getBytes(StandardCharsets.UTF_8));
         assertThat(Files.readAllBytes(trace.archiveDirectory().resolve("agent-stderr.log")))
@@ -84,6 +104,8 @@ class LocalRunTraceServiceTest {
         assertThat(json.path("lifecycle").path("status").asText()).isEqualTo("COMPLETE");
         assertThat(json.path("task").path("text").asText()).isEqualTo(task);
         assertThat(json.path("task").path("sha256").asText()).isEqualTo(sha(task));
+        assertThat(json.path("taskSpec").path("originalTask").asText()).isEqualTo(task);
+        assertThat(json.path("taskSpec").path("taskType").asText()).isEqualTo("ANALYSIS");
         assertThat(json.path("prompt").path("sha256").asText()).isEqualTo(sha(prompt));
         assertThat(json.path("execution").path("stdoutSha256").asText()).isEqualTo(sha(execution.stdout()));
         assertThat(json.path("execution").path("stderrSha256").asText()).isEqualTo(sha(execution.stderr()));
